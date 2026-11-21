@@ -279,3 +279,20 @@ footer { font-size: 12px; color: var(--muted); }
 :fullscreen .app { max-width: none; min-height: 100vh; }
 :fullscreen footer, :fullscreen .explain-keys { display: none; }
 @media (max-width: 980px) { .explain { grid-template-columns: 1fr; } .explain-side { position: static; } .explain-say { font-size: 20px; } }
+
+/* Multi-year history (Tiger Data) */
+.history-card { display: flex; flex-direction: column; gap: 16px; }
+.history-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+.history-head h2 { margin: 4px 0 6px; font-size: 20px; }
+.history-head p { margin: 0; font-size: 13px; max-width: 720px; line-height: 1.5; }
+.history-source { text-align: right; }
+.history-stats { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.history-chip { background: var(--cell); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; color: var(--ink-2); }
+.history-chip b { font-family: var(--mono); font-weight: 500; color: var(--ink); }
+.history-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; align-items: end; }
+.history-result { font-size: 14px; line-height: 1.5; color: var(--ink-2); min-height: 21px; }
+.c-green { color: var(--green); }
+.history-stage { position: relative; overflow-x: auto; }
+.history-canvas { display: block; width: 100%; min-width: 640px; }
+.history-foot { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; align-items: flex-end; }
+.history-foot .note { max-width: 560px; }

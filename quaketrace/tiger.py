@@ -149,3 +149,243 @@ def weekly_station_history(
         connection.execute("SET LOCAL statement_timeout = '4s'")
         rows = connection.execute(WEEKLY_HISTORY, parameters).fetchall()
     return [(week.astimezone(timezone.utc), events, median) for week, events, median in rows]
+
+
+# ---------------------------------------------------------------- multi-year history
+
+HISTORY_SCHEMA = (
+    "CREATE EXTENSION IF NOT EXISTS timescaledb",
+    "CREATE SCHEMA IF NOT EXISTS quaketrace",
+    """
+    CREATE TABLE IF NOT EXISTS quaketrace.events (
+        event_id text PRIMARY KEY,
+        event_time timestamptz NOT NULL,
+        latitude double precision NOT NULL,
+        longitude double precision NOT NULL,
+        depth_km double precision NOT NULL,
+        magnitude double precision,
+        place text NOT NULL DEFAULT ''
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS events_time ON quaketrace.events (event_time DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS quaketrace.picks (
+        event_time timestamptz NOT NULL,
+        event_id text NOT NULL,
+        station_id text NOT NULL,
+        location_code text NOT NULL,
+        channel_code text NOT NULL,
+        phase text NOT NULL,
+        pick_time timestamptz NOT NULL,
+        residual_s double precision NOT NULL,
+        weight double precision NOT NULL,
+        distance_deg double precision,
+        azimuth_deg double precision,
+        PRIMARY KEY (event_time, event_id, station_id, phase)
+    )
+    """,
+    """
+    SELECT create_hypertable(
+        'quaketrace.picks', by_range('event_time', INTERVAL '90 days'), if_not_exists => TRUE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS picks_station_time ON quaketrace.picks (station_id, event_time DESC)",
+)
+
+# Same filter as quaketrace.history.local_monthly_buckets.
+P_FILTER = "phase IN ('P', 'Pg', 'Pn') AND abs(residual_s) < 10"
+
+STATION_MONTHLY = f"""
+    CREATE MATERIALIZED VIEW quaketrace.station_monthly
+    WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
+    SELECT time_bucket(INTERVAL '1 month', event_time) AS month,
+           station_id,
+           count(*) AS picks,
+           avg(residual_s) AS mean_residual_s,
+           stddev_samp(residual_s) AS spread_s
+    FROM quaketrace.picks
+    WHERE {P_FILTER}
+    GROUP BY month, station_id
+    WITH NO DATA
+"""
+
+COPY_PICKS = """
+    COPY picks_load (event_time, event_id, station_id, location_code, channel_code, phase,
+                     pick_time, residual_s, weight, distance_deg, azimuth_deg) FROM STDIN
+"""
+
+BUSIEST_STATIONS = """
+    SELECT station_id, sum(picks)::bigint AS picks
+    FROM quaketrace.station_monthly
+    GROUP BY station_id
+    ORDER BY picks DESC, station_id
+    LIMIT %s
+"""
+
+MONTHLY_FROM_AGGREGATE = """
+    SELECT month, station_id, picks, mean_residual_s
+    FROM quaketrace.station_monthly
+    WHERE station_id = ANY(%s)
+    ORDER BY station_id, month
+"""
+
+MONTHLY_WITH_SHIFT = f"""
+    SELECT time_bucket(INTERVAL '1 month', event_time) AS month,
+           station_id,
+           count(*) AS picks,
+           avg(residual_s + CASE WHEN station_id = %(station)s AND event_time >= %(onset)s
+                                 THEN %(offset)s ELSE 0 END) AS mean_residual_s
+    FROM quaketrace.picks
+    WHERE {P_FILTER} AND station_id = ANY(%(stations)s)
+    GROUP BY month, station_id
+    ORDER BY station_id, month
+"""
+
+HISTORY_TOTALS = """
+    SELECT count(*), count(DISTINCT event_id), count(DISTINCT station_id), min(event_time), max(event_time)
+    FROM quaketrace.picks
+"""
+
+CHUNK_COUNTS = """
+    SELECT count(*), count(*) FILTER (WHERE is_compressed) FROM timescaledb_information.chunks
+    WHERE hypertable_schema = 'quaketrace' AND hypertable_name = 'picks'
+"""
+
+# TimescaleDB renamed compression to "columnstore"; try the new name, then the old one.
+COMPRESSION_SIZES = (
+    "SELECT sum(before_compression_total_bytes), sum(after_compression_total_bytes) "
+    "FROM hypertable_columnstore_stats('quaketrace.picks')",
+    "SELECT sum(before_compression_total_bytes), sum(after_compression_total_bytes) "
+    "FROM hypertable_compression_stats('quaketrace.picks')",
+)
+
+
+@contextmanager
+def _autocommit(dsn: str, operation: str):
+    with _connect(dsn, operation) as connection:
+        connection.autocommit = True
+        yield connection
+
+
+def _first_row(connection, statements):
+    for statement in statements:
+        try:
+            return connection.execute(statement).fetchone()
+        except psycopg.Error:
+            continue
+    return None
+
+
+def seed_history(dsn: str, events, picks) -> dict:
+    """Load the history bundle, then compress old chunks and build the monthly aggregate."""
+    with _autocommit(dsn, "Tiger Data history seed") as connection:
+        for statement in HISTORY_SCHEMA:
+            connection.execute(statement)
+        with connection.transaction():
+            connection.execute(
+                "CREATE TEMP TABLE picks_load (LIKE quaketrace.picks INCLUDING DEFAULTS) ON COMMIT DROP"
+            )
+            with connection.cursor().copy(COPY_PICKS) as copy:
+                for row in picks:
+                    copy.write_row(astuple(row))
+            inserted_picks = connection.execute(
+                "INSERT INTO quaketrace.picks SELECT * FROM picks_load ON CONFLICT DO NOTHING"
+            ).rowcount
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO quaketrace.events VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (event_id) DO UPDATE
+                        SET magnitude = EXCLUDED.magnitude, place = EXCLUDED.place
+                    """,
+                    [astuple(event) for event in events],
+                )
+        enabled = connection.execute(
+            """
+            SELECT compression_enabled FROM timescaledb_information.hypertables
+            WHERE hypertable_schema = 'quaketrace' AND hypertable_name = 'picks'
+            """
+        ).fetchone()
+        if not (enabled and enabled[0]):
+            connection.execute(
+                """
+                ALTER TABLE quaketrace.picks SET (
+                    timescaledb.compress,
+                    timescaledb.compress_segmentby = 'station_id',
+                    timescaledb.compress_orderby = 'event_time DESC, phase'
+                )
+                """
+            )
+        connection.execute(
+            "SELECT add_compression_policy('quaketrace.picks', INTERVAL '180 days', if_not_exists => TRUE)"
+        )
+        compressed = connection.execute(
+            """
+            SELECT count(compress_chunk(chunk, if_not_compressed => TRUE))
+            FROM show_chunks('quaketrace.picks', older_than => INTERVAL '180 days') AS chunk
+            """
+        ).fetchone()[0]
+        exists = connection.execute(
+            """
+            SELECT 1 FROM timescaledb_information.continuous_aggregates
+            WHERE view_schema = 'quaketrace' AND view_name = 'station_monthly'
+            """
+        ).fetchone()
+        if not exists:
+            connection.execute(STATION_MONTHLY)
+            connection.execute(
+                """
+                SELECT add_continuous_aggregate_policy('quaketrace.station_monthly',
+                    start_offset => INTERVAL '3 months', end_offset => INTERVAL '1 day',
+                    schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE)
+                """
+            )
+        connection.execute("CALL refresh_continuous_aggregate('quaketrace.station_monthly', NULL, NULL)")
+        stats = history_stats(connection)
+    return {"inserted_picks": inserted_picks, "events": len(events), "compressed_chunks": compressed, **stats}
+
+
+def history_stats(connection) -> dict:
+    picks, events, stations, first, last = connection.execute(HISTORY_TOTALS).fetchone()
+    chunks = _first_row(connection, (CHUNK_COUNTS,))
+    sizes = _first_row(connection, COMPRESSION_SIZES)
+    ratio = round(sizes[0] / sizes[1], 1) if sizes and sizes[0] and sizes[1] else None
+    return {
+        "picks": int(picks), "events": int(events), "stations": int(stations),
+        "first": first.astimezone(timezone.utc).isoformat() if first else None,
+        "last": last.astimezone(timezone.utc).isoformat() if last else None,
+        "chunks": chunks[0] if chunks else None,
+        "compressedChunks": chunks[1] if chunks else None,
+        "compressionRatio": ratio,
+    }
+
+
+def history_buckets(
+    dsn: str, *, limit: int, stations: list[str] | None = None,
+    shifted_station: str | None = None, onset: datetime | None = None, offset_s: float = 0.0,
+):
+    """Monthly station residuals from Tiger Data.
+
+    Reads the continuous aggregate normally. When a judge injects a clock shift
+    into history it queries the raw hypertable, applying the shift in SQL.
+    """
+    from .history import Bucket  # noqa: PLC0415 - history imports nothing from here; keep it lazy
+
+    with _autocommit(dsn, "Tiger Data history query") as connection:
+        connection.execute("SET statement_timeout = '8s'")
+        busiest = [(row[0], int(row[1])) for row in connection.execute(BUSIEST_STATIONS, (limit,)).fetchall()]
+        names = list(dict.fromkeys(list(stations or []) + [station for station, _ in busiest]))
+        if offset_s and shifted_station and onset:
+            rows = connection.execute(MONTHLY_WITH_SHIFT, {
+                "station": shifted_station, "onset": onset, "offset": offset_s, "stations": names,
+            }).fetchall()
+            source = "hypertable"
+        else:
+            rows = connection.execute(MONTHLY_FROM_AGGREGATE, (names,)).fetchall()
+            source = "continuous aggregate"
+        stats = history_stats(connection)
+    buckets = [
+        Bucket(month.astimezone(timezone.utc), station, int(picks), float(mean))
+        for month, station, picks, mean in rows
+    ]
+    return busiest, names, buckets, stats, source

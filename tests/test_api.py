@@ -91,6 +91,22 @@ class ApiPayloadTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             api.lab(self.fixture, MAINSHOCK, None, 0.0, "XX.NOPE")
 
+    def test_history_view_catches_a_shift_injected_into_years_of_real_data(self):
+        with patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("QUAKETRACE_TIGER_DSN", None)
+            clean = api.history_view("LD.PAL")
+            shifted = api.history_view("LD.PAL", "2024-04-27", 3.0)
+        json.dumps(shifted)
+        self.assertEqual(clean["source"], "local")
+        self.assertGreater(clean["stats"]["events"], 500)
+        self.assertEqual(len(clean["months"]), len(clean["stations"][0]["values"]))
+        self.assertEqual([row["station"] for row in clean["stations"] if row["status"] == "flagged"], [])
+        pal = next(row for row in shifted["stations"] if row["station"] == "LD.PAL")
+        self.assertEqual(pal["status"], "flagged")
+        self.assertEqual(pal["firstFlag"][:7], "2024-05")
+        self.assertAlmostEqual(pal["estimatedOffsetS"], 3.0, delta=0.3)
+        self.assertEqual(shifted["scenario"]["station"], "LD.PAL")
+
     def test_waveform_is_downsampled_with_pick(self):
         wave = api.waveform(self.fixture)
         self.assertLessEqual(len(wave["trace"]), 720)

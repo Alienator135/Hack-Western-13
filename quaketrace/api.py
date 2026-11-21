@@ -433,3 +433,112 @@ def lab_runs(fixture: Fixture, event_id: str, station: str | None, offset_s: flo
         "runs": runs,
         "elapsedMs": round((perf_counter() - started) * 1000, 1),
     }
+
+
+# ---------------------------------------------------------------- multi-year history (Tiger Data)
+
+HISTORY_STATIONS = 20
+_history_cache = None
+
+
+def _local_history():
+    global _history_cache  # noqa: PLW0603 - one immutable bundle per process
+    if _history_cache is None:
+        from .history import load_history  # noqa: PLC0415
+        _history_cache = load_history()
+    return _history_cache
+
+
+def _months_between(first: datetime, last: datetime) -> list[datetime]:
+    from .history import month_start  # noqa: PLC0415
+    months, current = [], month_start(first)
+    end = month_start(last)
+    while current <= end:
+        months.append(current)
+        current = current.replace(year=current.year + (current.month == 12), month=current.month % 12 + 1)
+    return months
+
+
+def history_view(station: str | None = None, onset: str | None = None, offset_s: float = 0.0) -> dict:
+    """Station clock health across the multi-year history, from Tiger Data when configured."""
+    from os import getenv  # noqa: PLC0415
+
+    from .data import TIGER_DSN_ENV, utc  # noqa: PLC0415
+    from .history import assess, busiest_stations, history_available, local_monthly_buckets  # noqa: PLC0415
+
+    started = perf_counter()
+    if not -MAX_SHIFT_S <= offset_s <= MAX_SHIFT_S:
+        raise ValueError(f"Shift must be within ±{MAX_SHIFT_S:g} s.")
+    onset_time = utc(f"{onset}T00:00:00+00:00") if onset else None
+    shift = bool(offset_s and station and onset_time)
+    wanted = [station] if station else []
+    note = None
+    dsn = getenv(TIGER_DSN_ENV)
+    result = None
+    if dsn:
+        from .tiger import TigerDataError, history_buckets  # noqa: PLC0415
+        try:
+            result = history_buckets(
+                dsn, limit=HISTORY_STATIONS, stations=wanted,
+                shifted_station=station if shift else None, onset=onset_time, offset_s=offset_s if shift else 0.0,
+            )
+            source = "tiger"
+        except TigerDataError as error:
+            note = f"{error} Showing the bundled history instead."
+    if result is None:
+        if not history_available():
+            return {"available": False, "note": note or "Run scripts/fetch_history.py to build the history bundle."}
+        history = _local_history()
+        busiest = busiest_stations(history, HISTORY_STATIONS)
+        names = list(dict.fromkeys(wanted + [name for name, _ in busiest]))
+        buckets = local_monthly_buckets(
+            history, stations=names, shifted_station=station if shift else None,
+            onset=onset_time, offset_s=offset_s if shift else 0.0,
+        )
+        times = [event.event_time for event in history.events]
+        stats = {
+            "picks": len(history.picks), "events": len(history.events),
+            "stations": len({pick.station_id for pick in history.picks}),
+            "first": min(times).isoformat(), "last": max(times).isoformat(),
+            "chunks": None, "compressedChunks": None, "compressionRatio": None,
+        }
+        result = (busiest, names, buckets, stats, "bundled file")
+        source = "local"
+    busiest, names, buckets, stats, query = result
+    months = _months_between(utc(stats["first"]), utc(stats["last"])) if stats["first"] else []
+    index = {month: i for i, month in enumerate(months)}
+    by_station: dict[str, list] = {name: [] for name in names}
+    for bucket in buckets:
+        by_station.setdefault(bucket.station_id, []).append(bucket)
+    counts = dict(busiest)
+    rows = []
+    for name in names:
+        series = sorted(by_station.get(name, []), key=lambda bucket: bucket.month)
+        health = assess(series)
+        values = [None] * len(months)
+        picks = [0] * len(months)
+        deviations = [None] * len(months)
+        for bucket in series:
+            if bucket.month in index:
+                values[index[bucket.month]] = round(bucket.mean_residual_s, 3)
+                picks[index[bucket.month]] = bucket.picks
+        for month, deviation in health.deviations.items():
+            if month in index:
+                deviations[index[month]] = round(deviation, 3)
+        rows.append({
+            "station": name, "short": short_name(name), "picks": counts.get(name, sum(picks)),
+            "status": health.status,
+            "firstFlag": health.first_flag.isoformat() if health.first_flag else None,
+            "confirmed": health.confirmed.isoformat() if health.confirmed else None,
+            "lastNormal": health.last_normal.isoformat() if health.last_normal else None,
+            "estimatedOffsetS": _round(health.estimated_offset_s, 2),
+            "values": values, "counts": picks, "deviations": deviations,
+        })
+    return {
+        "available": True, "source": source, "query": query, "note": note,
+        "stats": stats, "months": [month.isoformat() for month in months],
+        "stations": rows,
+        "scenario": {"station": station if shift else None, "onset": onset if shift else None, "offsetS": offset_s if shift else 0.0},
+        "thresholdS": 1.5,
+        "elapsedMs": round((perf_counter() - started) * 1000, 1),
+    }

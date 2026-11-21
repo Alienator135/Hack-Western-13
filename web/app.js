@@ -2,6 +2,7 @@ import { createMapView } from "./map.js";
 import { timelineChart, travelTimeChart, waveformChart } from "./charts.js";
 import { LabCanvas, LEGEND_TICKS, drawMiniHeat, legendGradient, misfitT } from "./lab.js";
 import { ExplainStage, buildSteps, deriveStory } from "./explain.js";
+import { HistoryChart, historyLegend } from "./history.js";
 
 // ---------------------------------------------------------------- helpers
 
@@ -33,6 +34,7 @@ const state = {
   audit: { station: null, onset: null, offset: 3, result: null, inspected: null, ran: false },
   decisions: store.get("qt.decisions", []),
   maps: [],
+  history: { view: null, station: "LD.PAL", onset: "2024-04-27", offset: 3, applied: false, scrollTo: false },
   explain: { event: null, station: null, offset: 5, secret: false, step: -1, base: null, story: null, steps: null },
   lab: { event: null, station: null, offset: 0, exclude: null, secret: false, mode: "search", data: null, runs: null, played: false },
 };
@@ -519,6 +521,7 @@ function renderAudit() {
       </section>
       ${finding}
     </div>
+    ${historyCardHtml()}
     ${details([
       { title: "Judge controls: break a clock", open: !res.scenario.offsetS, body: `<form class="audit-controls" id="audit-form">
         <div class="field"><label for="a1">Station</label><select id="a1" class="select small mono">${state.overview.auditStations.map((id) => `<option ${id === a.station ? "selected" : ""}>${esc(id)}</option>`).join("")}</select></div>
@@ -539,6 +542,126 @@ function renderAudit() {
       </div>` },
     ])}
   `);
+  mountHistory();
+}
+
+// ---------------------------------------------------------------- multi-year history (Tiger Data)
+
+const monthLabel = (iso, opts = { month: "short", year: "numeric" }) => (iso ? new Date(iso).toLocaleDateString("en-US", { ...opts, timeZone: "UTC" }) : "—");
+
+function historyCardHtml() {
+  const h = state.history;
+  return `
+    <section class="card pad history-card" id="history">
+      <div class="history-head">
+        <div>
+          <div class="kicker" style="color:var(--blue-ink)">SCALE IT UP · TIGER DATA</div>
+          <h2>Every station's clock, every quake since 2018</h2>
+          <p class="c-muted">Each cell is one station's average P-wave timing error for a month, compared with its previous six active months. Orange runs late, blue runs early.</p>
+        </div>
+        <div class="history-source" id="history-source"></div>
+      </div>
+      <div class="history-stats" id="history-stats"><span class="c-muted">Loading history…</span></div>
+      <form class="history-controls" id="history-form">
+        <div class="field"><label for="h-st">Break a clock in history</label><select id="h-st" class="select small mono"></select></div>
+        <div class="field"><label for="h-on">Starting</label><input id="h-on" class="select small" type="date" value="${esc(h.onset)}" min="2018-01-01" max="2025-12-31"></div>
+        <div class="field"><div class="range-head"><label for="h-off">Shift</label><span class="mono c-orange" id="h-off-value">${sign(h.offset)} s</span></div><input id="h-off" type="range" min="-5" max="5" step="0.5" value="${h.offset}"></div>
+        <div style="display:flex;gap:8px;align-items:end"><button class="btn-primary" type="submit" style="height:40px;font-size:14px">Run on Tiger</button><button class="btn-plain" type="button" data-action="history-clear" style="height:40px">Clear</button></div>
+      </form>
+      <div class="history-result" id="history-result"></div>
+      <div class="history-stage" id="history-stage"><div class="lab-tip" id="history-tip" hidden></div></div>
+      <div class="history-foot">
+        <div class="lab-legend"><div class="label">Monthly shift from normal (s)</div><div class="lab-ramp" style="background:${historyLegend()}"></div><div class="lab-ticks"><span style="left:0">−3 early</span><span style="left:50%">0</span><span style="left:100%">+3 late</span></div></div>
+        <p class="note" style="margin:0">Flag rule: two active months in a row, same direction, at least 1.5 s from the median of the previous six. Grey = one pick that month, or not enough earlier months for a baseline. Blank = no quakes.</p>
+      </div>
+    </section>`;
+}
+
+async function loadHistory() {
+  const h = state.history;
+  // Always include the chosen station as a row; only apply the shift once the judge runs it.
+  const params = new URLSearchParams(h.applied ? { station: h.station, onset: h.onset, offset: String(h.offset) } : { station: h.station });
+  h.view = await getJSON(`/api/history?${params}`);
+}
+
+async function mountHistory() {
+  const h = state.history;
+  try {
+    if (!h.view) await loadHistory();
+  } catch (error) {
+    const stats = $("#history-stats");
+    if (stats) stats.innerHTML = `<span class="c-orange">${esc(error.message)}</span>`;
+    return;
+  }
+  fillHistory();
+  if (h.scrollTo) {
+    h.scrollTo = false;
+    $("#history")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function fillHistory() {
+  const h = state.history;
+  const view = h.view;
+  if (!$("#history")) return;
+  if (!view.available) {
+    $("#history-stats").innerHTML = `<span class="c-muted">${esc(view.note)}</span>`;
+    return;
+  }
+  const s = view.stats;
+  const tiger = view.source === "tiger";
+  $("#history-source").innerHTML = tiger
+    ? `<span class="status"><span class="dot"></span>Live from Tiger Data</span>`
+    : `<span class="status"><span class="dot busy"></span>Bundled copy</span><span class="note" style="display:block;margin-top:2px">Set QUAKETRACE_TIGER_DSN to query Tiger live</span>`;
+  const chips = [
+    `<b>${s.picks.toLocaleString()}</b> P-wave picks`,
+    `<b>${s.events.toLocaleString()}</b> quakes`,
+    `<b>${s.stations.toLocaleString()}</b> stations`,
+    `${monthLabel(s.first)} – ${monthLabel(s.last)}`,
+    tiger && s.chunks ? `hypertable: <b>${s.chunks}</b> chunks, ${s.compressedChunks} compressed${s.compressionRatio ? ` (${s.compressionRatio}× smaller)` : ""}` : null,
+    `${esc(view.query)} · <b>${view.elapsedMs} ms</b>`,
+  ].filter(Boolean);
+  $("#history-stats").innerHTML = chips.map((chip) => `<span class="history-chip">${chip}</span>`).join("");
+  $("#history-form button[type=submit]").textContent = tiger ? "Run on Tiger" : "Run on bundled copy";
+  const select = $("#h-st");
+  select.innerHTML = view.stations.map((row) => `<option value="${esc(row.station)}" ${row.station === h.station ? "selected" : ""}>${esc(row.station)}</option>`).join("");
+  const flagged = view.stations.filter((row) => row.status === "flagged");
+  const sc = view.scenario;
+  let result;
+  if (sc.station) {
+    const hit = flagged.find((row) => row.station === sc.station);
+    result = hit
+      ? `<strong class="c-green">Caught.</strong> ${esc(hit.station)} flagged from <b>${monthLabel(hit.firstFlag)}</b>, confirmed ${monthLabel(hit.confirmed)}, about <b>${sign(hit.estimatedOffsetS)} s</b>. Last normal month: ${monthLabel(hit.lastNormal)}.`
+      : `<strong>Not flagged.</strong> A ${sign(sc.offsetS)} s shift on ${esc(sc.station)} from ${esc(sc.onset)} did not hold for two active months. Try a larger shift or an earlier date.`;
+    const others = flagged.filter((row) => row.station !== sc.station);
+    if (others.length) result += ` Also flagged in the real data: ${others.map((row) => `${esc(row.short)} (${monthLabel(row.firstFlag)})`).join(", ")}.`;
+  } else {
+    result = flagged.length
+      ? `<strong>In the real data</strong>, ${flagged.map((row) => `${esc(row.station)} drifted ${sign(row.estimatedOffsetS)} s from ${monthLabel(row.firstFlag)}`).join("; ")}.`
+      : `<strong>Real data:</strong> no station shows a sustained timing shift across ${s.events.toLocaleString()} quakes. Break one above to see Tiger catch it.`;
+  }
+  $("#history-result").innerHTML = result;
+  const stage = $("#history-stage");
+  const tip = $("#history-tip");
+  state.historyChart?.destroy();
+  const chart = new HistoryChart(stage, {
+    onHover(info) {
+      if (!info) { tip.hidden = true; return; }
+      const parts = [`<strong>${esc(info.station.station)}</strong> · ${monthLabel(info.month)}`];
+      if (!info.picks) parts.push("No picks this month");
+      else {
+        parts.push(`${info.picks} pick${info.picks === 1 ? "" : "s"} · average residual ${sign(info.value, 2)} s`);
+        parts.push(info.deviation === null ? "Not enough history for a baseline yet" : `${sign(info.deviation, 2)} s from normal`);
+      }
+      tip.innerHTML = parts.join("<br>");
+      tip.hidden = false;
+      tip.style.left = `${Math.max(8, Math.min(info.x + 14, info.width - 250))}px`;
+      tip.style.top = `${info.y + 16}px`;
+    },
+  });
+  chart.setData(view);
+  state.historyChart = chart;
+  state.maps.push(chart);
 }
 
 async function showAudit() {
@@ -875,6 +998,7 @@ function explainSide() {
       </div>
       <div class="divider"><div class="label">Error vs USGS epicentre</div><div class="stat-mid"><span class="c-orange">${d.lab.usgsKm.toFixed(1)}</span>${c ? ` → <span class="c-blue">${d.labEx.usgsKm.toFixed(1)} km</span>` : " km"}</div></div>
       ${s && state.overview.auditStations.includes(s) ? `<button class="btn-primary" type="button" data-action="ex-audit">When did ${esc(short(s))}'s clock break?${ARROW}</button>` : ""}
+      ${s ? `<button class="btn-plain" type="button" data-action="ex-history" style="height:48px">Scale it up: every quake since 2018 in Tiger Data</button>` : ""}
       <div class="explain-nav"><button class="btn-plain" type="button" data-action="ex-back">← Back</button><button class="btn-plain" type="button" data-action="ex-restart">Start over</button></div>
       <div class="explain-dots" aria-hidden="true">${dots}</div>`;
     return;
@@ -1029,6 +1153,13 @@ document.addEventListener("click", async (event) => {
       } else if (action === "ex-restart") {
         Object.assign(state.explain, { story: null, steps: null, step: -1, secret: false });
         renderExplain();
+      } else if (action === "ex-history") {
+        const sc = state.explain.story.scenario;
+        Object.assign(state.history, { station: sc.station, onset: "2024-04-27", offset: Math.max(-5, Math.min(5, Math.round(sc.offsetS * 2) / 2)), applied: true, view: null, scrollTo: true });
+        location.hash = "#/audit";
+      } else if (action === "history-clear") {
+        Object.assign(state.history, { applied: false, view: null });
+        await mountHistory();
       } else if (action === "ex-audit") {
         const sc = state.explain.story.scenario;
         Object.assign(a, { station: sc.station, onset: state.overview.evaluationEvents[1], offset: Math.max(-5, Math.min(5, Math.round(sc.offsetS * 2) / 2)) });
@@ -1068,6 +1199,8 @@ document.addEventListener("input", (event) => {
     $("#a3-value").textContent = `${sign(state.audit.offset)} s`;
   } else if (event.target.id === "dim") {
     state.dim = Number(event.target.value);
+  } else if (event.target.id === "h-off") {
+    $("#h-off-value").textContent = `${sign(Number(event.target.value))} s`;
   } else if (event.target.id === "ex-sh") {
     $("#ex-sh-value").textContent = `${sign(Number(event.target.value))} s`;
   } else if (event.target.id === "lab-sh") {
@@ -1101,6 +1234,15 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.id === "history-form") {
+    event.preventDefault();
+    Object.assign(state.history, { station: $("#h-st").value, onset: $("#h-on").value, offset: Number($("#h-off").value), applied: true, view: null });
+    if (!state.history.onset) return;
+    const button = event.target.querySelector("button[type=submit]");
+    button.disabled = true;
+    try { await mountHistory(); } finally { button.disabled = false; }
+    return;
+  }
   if (event.target.id === "lab-form") {
     event.preventDefault();
     const l = state.lab;

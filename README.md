@@ -43,23 +43,29 @@ Markers use Google's `DEMO_MAP_ID`. Set `GOOGLE_MAPS_MAP_ID` to use your own clo
 
 ## Tiger Data
 
-Tiger Data can supply the real arrival picks used by Replay and Station Audit. The seed command writes the 45 fixture arrivals to a TimescaleDB hypertable partitioned by earthquake time. The app queries the matching fixture revision by station and time. The source measurements stay intact when a judge applies a simulated delay. The bundled map and waveform remain available offline.
+QuakeTrace keeps two things in Tiger Data (TimescaleDB):
 
-1. In Tiger Console, create a development service with **TimescaleDB** enabled and copy its PostgreSQL connection string. [Create a Tiger Cloud service](https://www.tigerdata.com/docs/get-started/quickstart/create-service) · [Find the connection details](https://www.tigerdata.com/docs/integrate/find-connection-details)
-2. From the repository root in PowerShell 7, install the updated dependencies and enter the connection string in a masked prompt:
+- **Years of station timing history.** Every north-east US earthquake since 2018 with published USGS phase data, and every arrival those solutions used, in the `quaketrace.picks` hypertable. Chunks older than 180 days are compressed (columnstore, segmented by station), and the `quaketrace.station_monthly` continuous aggregate keeps each station's monthly mean P-wave residual up to date. **Station audit → Every station's clock** reads the aggregate. When a judge breaks a clock in history, the same view is computed live from the raw hypertable, with the shift applied in SQL.
+- **The seven demo quakes.** The 45 bundled arrivals used by Replay and the seven-quake audit, in `quaketrace.arrivals`.
+
+1. In Tiger Console, create a service with **TimescaleDB** enabled and copy its PostgreSQL connection string. [Create a Tiger Cloud service](https://www.tigerdata.com/docs/get-started/quickstart/create-service) · [Find the connection details](https://www.tigerdata.com/docs/integrate/find-connection-details)
+2. From the repository root in PowerShell 7, enter the connection string in a masked prompt, load both datasets, and check them:
 
    ```powershell
    .venv/Scripts/python.exe -m pip install -r requirements.txt
    $env:QUAKETRACE_TIGER_DSN = Read-Host -MaskInput "Tiger Data PostgreSQL connection string"
    .venv/Scripts/python.exe scripts/tiger_data.py seed
+   .venv/Scripts/python.exe scripts/tiger_data.py seed-history
    .venv/Scripts/python.exe scripts/tiger_data.py verify
-   .venv/Scripts/python.exe scripts/tiger_data.py history --station LD.PAL
+   .venv/Scripts/python.exe scripts/tiger_data.py health --station LD.PAL --onset 2024-04-27 --offset 3
    .venv/Scripts/python.exe server.py
    ```
 
-3. Run `verify` for the demo check. It compares every cloud arrival with its bundled counterpart and runs the Palisades audit against the queried rows. `history` shows which weeks have station data and uses TimescaleDB's `time_bucket` to summarize event-centred timing residuals. [TimescaleDB time buckets](https://www.tigerdata.com/docs/reference/timescaledb/hyperfunctions/time-series-utilities/time_bucket)
+3. `seed-history` creates the schema, bulk-loads the picks with `COPY`, compresses old chunks, creates the continuous aggregate with a refresh policy, and prints the row, chunk, and compression totals. `health` runs the same query the UI uses and prints each station's status, so you can confirm Tiger flags the injected shift before presenting.
 
-The script reads the connection string from the current shell. Start the server in that same shell so it inherits the setting. The seed command can be rerun and inserts each revision only once. If the database is unavailable or the requested revision is missing rows, the app logs the reason and loads the bundled arrivals. The header shows **Ready · Tiger Data** when the cloud arrivals are in use, and **Station audit → Under the hood** names the active source.
+Start the server in the same shell so it inherits the connection string. With Tiger connected, the history card says **Live from Tiger Data** and shows the hypertable's chunk count, compression ratio, and each query's time. Without it, or if Tiger is unreachable, the card says **Bundled copy** and computes the same view from `fixtures/history`, so the demo never depends on venue Wi-Fi. Both seed commands can be rerun; existing rows are skipped.
+
+The history bundle is built from USGS by `scripts/fetch_history.py`, which caches raw responses under `fixtures/raw/history` and backs off when USGS rate-limits. [TimescaleDB hypertables](https://www.tigerdata.com/docs/use-timescale/latest/hypertables/) · [Continuous aggregates](https://www.tigerdata.com/docs/use-timescale/latest/continuous-aggregates/) · [Compression](https://www.tigerdata.com/docs/use-timescale/latest/compression/)
 
 ## Explore elsewhere
 
@@ -86,6 +92,7 @@ The app opens on **Present**, a step-by-step walkthrough meant to be presented t
 2. **Walk through the 12 steps.** Each one has a sentence to say and an animation: stations and their arrival times, one candidate point, distance to a station, travel time at 6 km/s, the start time each station implies, the spread of start times as the point's score, scoring all 8,100 grid points, refining on a 250 m grid, the best point against USGS, leaving each station out in turn, and the culprit.
 3. **Reveal.** Injected against found shift, and the error against USGS with and without the suspect.
 4. **Close with the audit.** **When did PAL's clock break?** opens the station audit for the same station across seven quakes.
+5. **Scale it up with Tiger Data.** **Scale it up: every quake since 2018** injects the judge's shift into years of real station history and shows Tiger Data catch it, with the query time on screen.
 
 **Replay**, **Station audit** and **Solver lab** remain in the header for questions.
 
@@ -104,9 +111,11 @@ The app opens on **Present**, a step-by-step walkthrough meant to be presented t
 | `web/` | The QuakeTrace UI: presenter walkthrough, guided replay, station audit, solver lab, and the Google Maps, Earth 3D, and offline map views |
 | `quaketrace/api.py` | JSON payloads for the UI: fits, best-fit zones, solver grid traces, leave-one-out surfaces, audit grid |
 | `app.py` | Earlier Streamlit app, including World Explorer |
-| `quaketrace/` | Fixture loading, location fit, station audit, maps, and live catalog exploration |
+| `quaketrace/` | Fixture loading, location fit, station audit, multi-year history, Tiger Data storage, maps, and live catalog exploration |
+| `scripts/fetch_history.py` | Downloads the multi-year USGS arrival history into `fixtures/history` |
+| `scripts/tiger_data.py` | Seeds Tiger Data with the demo arrivals and the history, and queries station health |
 | `scripts/fetch_fixtures.py` | Public source download, parsing, validation, and fixture generation |
-| `fixtures/` | Seven event origins, 45 arrival and station-epoch records, waveform, local outlines, and provenance manifest |
+| `fixtures/` | Seven event origins, 45 arrival and station-epoch records, waveform, local outlines, and provenance manifest. `fixtures/history` holds the multi-year history bundle |
 | `tests/` | Fixture integrity, parser, solver, audit, API and server, and Streamlit interaction coverage |
 
 Run these from the repository root with the project environment active:

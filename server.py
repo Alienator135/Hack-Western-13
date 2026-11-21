@@ -15,6 +15,7 @@ import argparse
 import json
 import logging
 import mimetypes
+import re
 from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -104,6 +105,14 @@ def route(path: str, query: dict) -> bytes:
         station = query.get("station", [None])[0] or None
         onset = query.get("onset", [None])[0] or None
         return audit_json(station if offset else None, onset if offset else None, offset)
+    if path == "/api/history":
+        # Not cached: with Tiger Data connected, every call is a live query.
+        offset = _offset(query)
+        station = query.get("station", [None])[0] or None
+        onset = query.get("onset", [None])[0] or None
+        if onset and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", onset):
+            raise ValueError("Onset must be a date like 2024-04-27.")
+        return json.dumps(api.history_view(station, onset, offset)).encode()
     raise LookupError(path)
 
 
