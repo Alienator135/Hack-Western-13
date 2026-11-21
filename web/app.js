@@ -494,22 +494,19 @@ function renderAudit() {
         <div><div style="font-size:13px;color:#6B4A33">Shift</div><div class="mono c-orange" style="font-size:24px;font-weight:500;margin-top:2px">${sign(flagged.estimatedOffsetS, 1)} s</div></div>
       </div>
       <div style="font-size:14px;line-height:1.5;color:var(--ink-2)">Review GPS logs from <strong>${esc(eventDate(flagged.lastNormal))} – ${esc(eventDate(flagged.firstSuspicious))}</strong>. Confirmed on ${esc(eventDate(flagged.confirming))}${flagged.supporting.length > 2 ? `, supported by ${flagged.supporting.slice(2).map((id) => esc(eventDate(id))).join(", ")}` : ""}.</div>
-      <div class="grid2" style="gap:8px">
-        <button class="btn-orange" type="button" data-decide="suspect">Mark as suspect</button>
-        <button class="btn-outline" type="button" data-decide="dismiss">Dismiss</button>
-      </div>
     </section>` : `
     <section class="side-col card pad" style="gap:16px">
       <div class="kicker calm">NO FINDING</div>
       <div style="font-size:14px;line-height:1.5;color:var(--ink-2)">${pending ? `${esc(pending.station)} was off on ${esc(eventDate(pending.firstSuspicious))}. One more quake off in the same direction will confirm it.` : `No station was off by ${res.thresholdS} s or more on two quakes in a row.`}</div>
       <button class="btn-plain" type="button" data-action="audit-example">Try the example · LD.PAL +3 s from Apr 27</button>
     </section>`;
-  const log = [
-    ...(a.ran ? [{ when: new Date().toISOString(), who: "QuakeTrace", action: flagged ? `Flagged ${flagged.station} · ${sign(flagged.estimatedOffsetS, 1)} s since ${eventDate(flagged.firstSuspicious)}` : "No station flagged" }] : []),
-    ...state.decisions,
-  ];
   render(`
-    ${headline(title, esc(sub))}
+    ${historyCardHtml()}
+    <div class="audit-zoom">
+      <div class="kicker" style="color:var(--muted)">ZOOM IN · THE SEVEN TEWKSBURY QUAKES</div>
+      <h2>${esc(title)}</h2>
+      <p class="c-muted">${esc(sub)}</p>
+    </div>
     <div class="row">
       <section class="main-col card pad" style="display:flex;flex-direction:column;gap:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -521,7 +518,6 @@ function renderAudit() {
       </section>
       ${finding}
     </div>
-    ${historyCardHtml()}
     ${details([
       { title: "Judge controls: break a clock", open: !res.scenario.offsetS, body: `<form class="audit-controls" id="audit-form">
         <div class="field"><label for="a1">Station</label><select id="a1" class="select small mono">${state.overview.auditStations.map((id) => `<option ${id === a.station ? "selected" : ""}>${esc(id)}</option>`).join("")}</select></div>
@@ -531,13 +527,9 @@ function renderAudit() {
       </form>` },
       { title: `${inspected.short} over time`, open: Boolean(flagged), body: `<div class="det-body">${timelineChart(events, inspected.deviationsS, { threshold: res.thresholdS, station: inspected.station, highlight: inspected.supporting })}
         <p class="note">Flag rule: 2 quakes in a row, same direction, at least ${res.thresholdS} s off · first 3 quakes set the baseline · click a station name to inspect it</p></div>` },
-      { title: "Decision log", body: `<div class="det-body scroll-x"><table class="table"><thead><tr><th>When</th><th>Who</th><th>Action</th></tr></thead><tbody>
-        ${log.length ? log.map((d) => `<tr><td>${esc(when(d.when))}</td><td style="font-family:var(--sans)">${esc(d.who)}</td><td style="font-family:var(--sans)">${esc(d.action)}</td></tr>`).join("") : '<tr><td colspan="3" style="font-family:var(--sans)" class="c-muted">No decisions yet</td></tr>'}
-        </tbody></table><p class="note">Decisions are kept in this browser only${state.decisions.length ? ' · <button type="button" class="btn-link" style="padding:0;font-size:12px" data-action="clear-log">Clear log</button>' : ""}</p></div>` },
       { title: "Under the hood", body: `<div class="det-body kv">
         <span>arrivals</span><span>${res.arrivalSource === "tiger" ? "Tiger Data hypertable · by pick time" : "Bundled fixture · fixtures/arrivals.json (set QUAKETRACE_TIGER_DSN for Tiger Data)"}</span>
         <span>station_baseline</span><span>median of the first 3 quakes, after removing each quake's median residual</span>
-        <span>decisions</span><span>this browser's local storage</span>
         <span>query time</span><span>${res.elapsedMs} ms</span>
       </div>` },
     ])}
@@ -997,8 +989,7 @@ function explainSide() {
         <div><div class="label">Found</div><div class="stat-mid">${c ? `${sign(c.offsetS, 2)} s` : "—"}</div><div class="mono c-muted" style="font-size:13px">${esc(c?.station || "")}</div></div>
       </div>
       <div class="divider"><div class="label">Error vs USGS epicentre</div><div class="stat-mid"><span class="c-orange">${d.lab.usgsKm.toFixed(1)}</span>${c ? ` → <span class="c-blue">${d.labEx.usgsKm.toFixed(1)} km</span>` : " km"}</div></div>
-      ${s && state.overview.auditStations.includes(s) ? `<button class="btn-primary" type="button" data-action="ex-audit">When did ${esc(short(s))}'s clock break?${ARROW}</button>` : ""}
-      ${s ? `<button class="btn-plain" type="button" data-action="ex-history" style="height:48px">Scale it up: every quake since 2018 in Tiger Data</button>` : ""}
+      ${s ? `<button class="btn-primary" type="button" data-action="ex-history">Scale it up: every quake since 2018 in Tiger Data${ARROW}</button>` : `<a class="btn-primary" href="#/audit">Every quake since 2018 in Tiger Data${ARROW}</a>`}
       <div class="explain-nav"><button class="btn-plain" type="button" data-action="ex-back">← Back</button><button class="btn-plain" type="button" data-action="ex-restart">Start over</button></div>
       <div class="explain-dots" aria-hidden="true">${dots}</div>`;
     return;
@@ -1269,32 +1260,7 @@ document.addEventListener("submit", async (event) => {
 // ---------------------------------------------------------------- About / Google Maps key
 
 function setupAbout() {
-  const dialog = $("#about");
-  const stateText = () => {
-    const local = store.get("qt.googleMapsKey", "");
-    const offline = store.get("qt.offline", false);
-    if (offline) return "Google Maps is turned off in this browser. The offline outline map is in use.";
-    if (local) return "Connected with a key saved in this browser.";
-    if (state.config.serverKey) return "Connected with the server's GOOGLE_MAPS_API_KEY.";
-    return "Not connected. Paste a browser key to switch on Google Maps, satellite imagery and the 3D Earth view.";
-  };
-  $("#about-open").addEventListener("click", () => {
-    $("#maps-state").textContent = stateText();
-    $("#maps-key").value = "";
-    dialog.showModal();
-  });
-  $("#maps-form").addEventListener("submit", (event) => {
-    if (event.submitter?.value !== "save") return;
-    const key = $("#maps-key").value.trim();
-    if (key) store.set("qt.googleMapsKey", key);
-    store.remove("qt.offline");
-    location.reload();
-  });
-  $("#maps-clear").addEventListener("click", () => {
-    store.remove("qt.googleMapsKey");
-    store.set("qt.offline", true);
-    location.reload();
-  });
+  $("#about-open").addEventListener("click", () => $("#about").showModal());
 }
 
 // ---------------------------------------------------------------- boot
@@ -1312,12 +1278,11 @@ async function boot() {
   try {
     const [overview, config] = await Promise.all([getJSON("/api/overview"), getJSON("/api/config")]);
     state.overview = overview;
-    const localKey = store.get("qt.googleMapsKey", "");
-    const offline = store.get("qt.offline", false);
     state.config = {
       googleMapId: config.googleMapId,
       serverKey: Boolean(config.googleMapsKey),
-      googleMapsKey: offline ? "" : localKey || config.googleMapsKey,
+      // Google Maps only when the server is given GOOGLE_MAPS_API_KEY (for example in .env).
+      googleMapsKey: config.googleMapsKey,
     };
     state.replay.event = overview.mainshock;
     state.wave = await getJSON("/api/waveform").catch(() => null);

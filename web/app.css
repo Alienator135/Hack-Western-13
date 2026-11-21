@@ -296,3 +296,8 @@ footer { font-size: 12px; color: var(--muted); }
 .history-canvas { display: block; width: 100%; min-width: 640px; }
 .history-foot { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; align-items: flex-end; }
 .history-foot .note { max-width: 560px; }
+
+/* Seven-quake audit, shown below the Tiger history card */
+.audit-zoom { margin-top: 12px; }
+.audit-zoom h2 { margin: 6px 0 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.audit-zoom p { margin: 0; font-size: 14px; }

@@ -514,7 +514,7 @@ export function createMapView(container, options) {
   container.innerHTML = `
     <div class="map-frame ${small ? "small" : ""}">
       <div class="map-host"></div>
-      ${small ? "" : `<div class="basemap" role="group" aria-label="Basemap">${BASEMAPS.map(([key, label]) => `<button type="button" data-basemap="${key}" aria-pressed="${key === basemap}" ${!hasGoogle && key !== "map" ? 'disabled title="Connect Google Maps in About to enable"' : ""}>${label}</button>`).join("")}</div>`}
+      ${small || !hasGoogle ? "" : `<div class="basemap" role="group" aria-label="Basemap">${BASEMAPS.map(([key, label]) => `<button type="button" data-basemap="${key}" aria-pressed="${key === basemap}" ${!hasGoogle && key !== "map" ? 'disabled title="Connect Google Maps in About to enable"' : ""}>${label}</button>`).join("")}</div>`}
       <div class="map-note" hidden></div>
       <a class="earth-link" target="_blank" rel="noopener" hidden>Open in Google Earth ↗</a>
     </div>`;
@@ -549,7 +549,6 @@ export function createMapView(container, options) {
     }
     provider = new SvgMap(host, overview, size);
     if (scene) provider.render(scene);
-    if (!hasGoogle && !small) showNote('Offline map · <a href="#" data-connect>Connect Google Maps</a> for street, satellite and 3D Earth views');
   }
 
   container.addEventListener("click", (event) => {

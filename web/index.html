@@ -20,7 +20,6 @@
       </a>
       <nav class="nav" aria-label="Views">
         <a href="#/" data-view="explain">Present</a>
-        <a href="#/replay" data-view="replay">Replay</a>
         <a href="#/audit" data-view="audit">Station audit</a>
         <a href="#/lab" data-view="lab">Solver lab</a>
       </nav>
@@ -31,24 +30,14 @@
     </div>
   </header>
   <main id="view" aria-live="polite"></main>
-  <footer>Data: USGS ComCat and EarthScope / Lamont-Doherty · Map outlines: Natural Earth · Basemaps: Google Maps when connected</footer>
+  <footer>Data: USGS ComCat and EarthScope / Lamont-Doherty · Map outlines: Natural Earth · Storage: Tiger Data (TimescaleDB)</footer>
 </div>
 
 <dialog id="about">
   <h2>About QuakeTrace</h2>
   <p>QuakeTrace replays real USGS arrival times from the April 2024 Tewksbury, New Jersey earthquake sequence. A judge shifts one station's clock, and QuakeTrace finds which station is lying by refitting the epicentre without each station in turn. The station audit tracks the same stations across seven quakes to date when a clock broke.</p>
-  <h2 style="margin-top:20px">Google Maps and Earth</h2>
-  <p id="maps-state"></p>
-  <form id="maps-form" method="dialog">
-    <label class="label" for="maps-key">Browser API key (stored only in this browser)</label>
-    <input id="maps-key" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…">
-    <p class="note">Enable <strong>Maps JavaScript API</strong> for Map and Satellite, and <strong>Map Tiles API</strong> for the 3D Earth view. Restrict the key to this site's address. You can also set <code>GOOGLE_MAPS_API_KEY</code> before starting the server.</p>
-    <div class="dialog-actions">
-      <button class="btn-plain" type="button" id="maps-clear">Use offline map</button>
-      <button class="btn-plain" type="submit" value="cancel">Close</button>
-      <button class="btn-orange" type="submit" value="save" id="maps-save" style="padding:0 16px">Save and reload</button>
-    </div>
-  </form>
+  <p>Years of station timing history live in Tiger Data: a compressed hypertable of USGS arrival picks and a continuous aggregate of each station's monthly timing. The audit queries it live, including any clock shift a judge injects.</p>
+  <form method="dialog" class="dialog-actions"><button class="btn-plain" type="submit">Close</button></form>
 </dialog>
 
 <script type="module" src="app.js"></script>

@@ -25,7 +25,6 @@ from quaketrace.sources import EARTHSCOPE, USGS_DETAIL, preferred_origin, produc
 
 NATURAL_EARTH = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.1/geojson"
 OUTLINE_URL = f"{NATURAL_EARTH}/ne_110m_admin_1_states_provinces.geojson"
-COUNTRIES_URL = f"{NATURAL_EARTH}/ne_50m_admin_0_countries.geojson"
 STATE_CODES = {"NJ", "NY", "PA", "CT", "DE", "MA", "MD", "RI"}
 
 
@@ -159,22 +158,12 @@ def fetch_fixtures(output: Path) -> None:
     if {feature["properties"]["postal"] for feature in outlines["features"]} != STATE_CODES:
         raise ValueError("Natural Earth is missing one or more regional outlines.")
 
-    country_shapes = json.loads(fetch(COUNTRIES_URL))
-    countries = {"type": "FeatureCollection", "features": [
-        {
-            "type": "Feature",
-            "properties": {"name": feature["properties"]["ADMIN"]},
-            "geometry": feature["geometry"],
-        }
-        for feature in country_shapes["features"]
-    ]}
     files = {
         "events.json": json.dumps(events, indent=2) + "\n",
         "stations.json": json.dumps(stations, indent=2) + "\n",
         "arrivals.json": json.dumps(arrivals, indent=2) + "\n",
         "waveform.csv": waveform,
         "outlines.geojson": json.dumps(outlines, separators=(",", ":")) + "\n",
-        "countries.geojson": json.dumps(countries, separators=(",", ":")) + "\n",
     }
     manifest = {
         "schema_version": 1, "phase_data_by_event": phase_sources, "sources": sources,
