@@ -14,7 +14,7 @@ from .data import (
 )
 from .replay import (
     KM_PER_DEGREE, KM_PER_LONGITUDE, SPEED_KM_S, DEPTH_KM, Fit, Reading, diagnose, distance_km,
-    fit_location, leave_one_out, misfit_surface, project, travel_time_s, unproject,
+    fit_location, leave_one_out, misfit_surface, project, search_trace, travel_time_s, unproject,
 )
 
 MAINSHOCK_MAGNITUDE = 4.8
@@ -318,5 +318,118 @@ def audit_view(fixture: Fixture, station: str | None, onset: str | None, offset_
         "pending": [row["station"] for row in pending],
         "thresholdS": THRESHOLD_S,
         "arrivalSource": fixture.arrival_source,
+        "elapsedMs": round((perf_counter() - started) * 1000, 1),
+    }
+
+
+# ---------------------------------------------------------------- solver lab
+
+RUN_STEP_KM = 4.0
+
+
+def _axis_lat_lon(east: np.ndarray, north: np.ndarray) -> tuple[list[float], list[float]]:
+    lats = [round(float(unproject(0.0, float(value)).latitude), 5) for value in north]
+    lons = [round(float(unproject(float(value), 0.0).longitude), 5) for value in east]
+    return lats, lons
+
+
+def _pass_json(search_pass) -> dict:
+    lats, lons = _axis_lat_lon(search_pass.east, search_pass.north)
+    rms = search_pass.rms
+    row, col = np.unravel_index(int(np.argmin(rms)), rms.shape)
+    return {
+        "lats": lats, "lons": lons, "stepKm": search_pass.step_km,
+        # Row-major, row 0 is the southern edge: the order the solver scans.
+        "rms": [round(float(value), 3) for value in rms.ravel()],
+        "best": {"lat": lats[row], "lon": lons[col], "rmsS": round(float(rms[row, col]), 3), "index": int(row * len(lons) + col)},
+    }
+
+
+def lab(fixture: Fixture, event_id: str, station: str | None, offset_s: float, exclude: str | None = None) -> dict:
+    """Everything the solver lab animates: both grid passes, the fit, and wave timing."""
+    started = perf_counter()
+    if event_id not in fixture.events:
+        raise ValueError(f"Unknown event: {event_id}")
+    if not -MAX_SHIFT_S <= offset_s <= MAX_SHIFT_S:
+        raise ValueError(f"Shift must be within ±{MAX_SHIFT_S:g} s.")
+    event = fixture.events[event_id]
+    readings, _ = readings_for(fixture, event_id)
+    ids = [reading.station_id for reading in readings]
+    if offset_s and station not in ids:
+        raise ValueError(f"{station} did not record {event_id}.")
+    if exclude and exclude not in ids:
+        raise ValueError(f"{exclude} did not record {event_id}.")
+    tampered = shift_readings(readings, station, offset_s)
+    used = tuple(reading for reading in tampered if reading.station_id != exclude)
+    trace = search_trace(used)
+    fit = trace.fit
+    west_south = unproject(float(trace.coarse.east[0]), float(trace.coarse.north[0]))
+    east_north = unproject(float(trace.coarse.east[-1]), float(trace.coarse.north[-1]))
+    stations = []
+    for reading in tampered:
+        predicted = travel_time_s(fit.location, reading.location)
+        stations.append({
+            "id": reading.station_id, "short": short_name(reading.station_id),
+            "lat": reading.location.latitude, "lon": reading.location.longitude,
+            "name": reading.location.name,
+            "excluded": reading.station_id == exclude,
+            "pickS": _round(reading.time_s - fit.origin_s),
+            "predictedS": _round(predicted),
+            "epicentralKm": round(distance_km(fit.location, reading.location), 2),
+        })
+    stations.sort(key=lambda row: row["predictedS"])
+    coarse, fine = _pass_json(trace.coarse), _pass_json(trace.fine)
+    return {
+        "event": {"id": event_id, "lat": event.latitude, "lon": event.longitude, "time": event.time.isoformat(),
+                  "magnitude": MAINSHOCK_MAGNITUDE if event_id == MAINSHOCK else None},
+        "scenario": {"station": station if offset_s else None, "offsetS": offset_s, "exclude": exclude},
+        "region": {"south": _round(west_south.latitude, 5), "west": _round(west_south.longitude, 5),
+                   "north": _round(east_north.latitude, 5), "east": _round(east_north.longitude, 5)},
+        "coarse": coarse,
+        "fine": fine,
+        # fit_location also re-tests the coarse winner alongside the fine grid.
+        "pointsTested": len(coarse["rms"]) + len(fine["rms"]) + 1,
+        "fit": {"lat": _round(fit.location.latitude, 5), "lon": _round(fit.location.longitude, 5),
+                "rmsS": _round(fit.rms_s), "atBoundary": bool(fit.at_boundary)},
+        "usgsKm": round(distance_km(fit.location, event), 2),
+        "stations": stations,
+        "model": {"speedKmS": SPEED_KM_S, "depthKm": DEPTH_KM},
+        "elapsedMs": round((perf_counter() - started) * 1000, 1),
+    }
+
+
+def lab_runs(fixture: Fixture, event_id: str, station: str | None, offset_s: float) -> dict:
+    """Coarse misfit maps for all stations and for each leave-one-out refit."""
+    started = perf_counter()
+    if event_id not in fixture.events:
+        raise ValueError(f"Unknown event: {event_id}")
+    readings, _ = readings_for(fixture, event_id)
+    if offset_s and station not in [reading.station_id for reading in readings]:
+        raise ValueError(f"{station} did not record {event_id}.")
+    tampered = shift_readings(readings, station, offset_s)
+    from .replay import X_MAX, X_MIN, Y_MAX, Y_MIN, _axis  # noqa: PLC0415 - solver grid bounds
+    east, north = _axis(X_MIN, X_MAX, RUN_STEP_KM), _axis(Y_MIN, Y_MAX, RUN_STEP_KM)
+    lats, lons = _axis_lat_lon(east, north)
+
+    def surface(subset):
+        fit = fit_location(subset)
+        values = misfit_surface(subset, east, north)
+        return {
+            "rms": [round(float(value), 2) for value in values.ravel()],
+            "fit": {"lat": _round(fit.location.latitude, 5), "lon": _round(fit.location.longitude, 5), "rmsS": _round(fit.rms_s)},
+        }
+
+    runs = []
+    for reading in tampered:
+        subset = tuple(other for other in tampered if other.station_id != reading.station_id)
+        run = surface(subset)
+        run["station"] = reading.station_id
+        run["short"] = short_name(reading.station_id)
+        runs.append(run)
+    runs.sort(key=lambda run: run["fit"]["rmsS"])
+    return {
+        "lats": lats, "lons": lons, "stepKm": RUN_STEP_KM,
+        "all": surface(tampered),
+        "runs": runs,
         "elapsedMs": round((perf_counter() - started) * 1000, 1),
     }

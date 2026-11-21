@@ -225,3 +225,37 @@ footer { font-size: 12px; color: var(--muted); }
   .basemap { top: 16px; right: 16px; }
   .grid3 { grid-template-columns: 1fr 1fr; }
 }
+
+/* Solver lab */
+.lab-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; align-items: end; }
+.lab-tabs { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; margin: 4px 4px 12px; }
+.lab-tabs button { padding: 10px 14px; background: #FFF; color: var(--muted); border: 0; font-size: 13px; font-weight: 500; cursor: pointer; }
+.lab-tabs button + button { border-left: 1px solid var(--line); }
+.lab-tabs button[aria-selected="true"] { background: var(--soft); color: var(--ink); }
+.lab-stage { position: relative; }
+.lab-canvas { display: block; width: 100%; aspect-ratio: 800 / 560; border-radius: 8px; cursor: crosshair; }
+.lab-tip { position: absolute; z-index: 4; max-width: 250px; background: rgba(20, 24, 31, 0.92); color: #FFF; font-size: 12px; line-height: 1.45; padding: 8px 10px; border-radius: 6px; pointer-events: none; }
+.lab-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px 4px 4px; }
+.lab-buttons { display: flex; gap: 8px; align-items: center; flex: 1 1 280px; }
+.lab-buttons input[type="range"] { flex: 1; min-width: 140px; accent-color: var(--blue); }
+.lab-legend { flex: 0 1 300px; }
+.lab-legend .label { font-size: 12px; margin-bottom: 4px; }
+.lab-ramp { height: 10px; border-radius: 3px; }
+.lab-ticks { position: relative; height: 16px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.lab-ticks span { position: absolute; transform: translateX(-50%); top: 2px; }
+.lab-ticks span:first-child { transform: none; }
+.lab-ticks span:last-child { transform: translateX(-100%); }
+.lab-phase { margin: 16px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink-2); min-height: 63px; }
+.lab-how ol { margin: 12px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.5; color: var(--ink-2); display: flex; flex-direction: column; gap: 6px; }
+.lab-wave-table { min-width: 0; margin-top: 12px; }
+.lab-wave-table td { color: #9AA4B2; transition: color .2s; }
+.lab-wave-table tr.reached td { color: var(--ink-2); }
+.lab-wave-table tr.recorded td:first-child { font-weight: 600; }
+.multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 16px; }
+.mini { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 6px; cursor: pointer; background: #FFF; transition: border-color .15s, box-shadow .15s; }
+.mini:hover { border-color: #9AA4B2; }
+.mini canvas { display: block; width: 100%; aspect-ratio: 1; border-radius: 6px; }
+.mini figcaption { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 2px 0; color: var(--ink-2); }
+.mini.best { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); }
+.mini.best figcaption span:first-child { color: var(--blue-ink); font-weight: 600; }
+.mini.active { outline: 2px solid var(--ink); outline-offset: 1px; }

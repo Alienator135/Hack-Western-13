@@ -67,13 +67,25 @@ In the Streamlit app, open **World explorer**, pick **Worldwide**, a country, a 
 
 Station names and registry coordinates come from EarthScope where available. Estimated positions use the distance and bearing published with the USGS arrival and are labelled separately. Some catalog events have no publicly available arrival data. Use **Street map** in Replay to see geographic context for the seven bundled clock-shift scenarios. [USGS earthquake catalog](https://earthquake.usgs.gov/fdsnws/event/1/) · [OpenStreetMap attribution](https://www.openstreetmap.org/copyright)
 
+## Solver lab
+
+Open **Solver lab** to show how QuakeTrace locates a quake. It draws the solver's real intermediate data, not an illustration.
+
+- **Grid search** animates every candidate epicentre `fit_location` evaluates: 8,100 cells on a 2 km grid, coloured by misfit as they are tested, then 625 cells on a 250 m grid in a zoomed inset around the coarse winner.
+- **Misfit heatmap** shows the whole surface with 0.5, 1, 2 and 4 s contours. Hover a cell to read the misfit if the quake had been there.
+- **Wavefronts** plays the P wave spreading from the best fit. Each station pulses when the model says the wave arrives and again when its clock recorded it, so a shifted clock visibly fires late.
+- **Leave one out** shows the nine refits as small multiples. The lying station is the one whose removal makes the bowl deep and tight. Click one to load it.
+
+Pick a scenario at the top, or open the lab from any Replay step to carry the judge's scenario across. A secret scenario stays hidden until **Show secret**.
+
 ## Three-minute demo
 
 1. **Real quake and tamper.** The map shows the nine stations that recorded the April 5 mainshock and QuakeTrace's own estimate. As the judge, choose a station and a clock shift, then select **Lock it in**. **Let the app pick secretly** chooses both without showing them.
 2. **Damage.** See how far the estimated epicentre moved and how the teal best-fit zone stretched. **Details** shows each station's residual and the fit statistics.
 3. **Investigate.** QuakeTrace refits without each station in turn. The arrival-time chart shows the suspect's reading against the expected 6 km/s line, and **Step through the runs** shows each refit on the map.
 4. **Reveal.** Compare the injected and found shifts and the error against the USGS epicentre with and without the suspect. Export the result as PNG or CSV.
-5. **Station audit.** **Check PAL across 7 quakes** carries the shift into the audit from April 27. The heatmap and finding show when the clock broke and which GPS log window to review. **Judge controls** runs any other scenario, and **Mark as suspect** or **Dismiss** records a decision in this browser.
+5. **Solver lab.** Select **Open this scenario in the solver lab**. Watch the grid search, play the wavefronts, and click the brightest leave-one-out map.
+6. **Station audit.** **Check PAL across 7 quakes** carries the shift into the audit from April 27. The heatmap and finding show when the clock broke and which GPS log window to review. **Judge controls** runs any other scenario, and **Mark as suspect** or **Dismiss** records a decision in this browser.
 
 | Scenario | Result on the committed fixture |
 |---|---|
@@ -87,8 +99,8 @@ Station names and registry coordinates come from EarthScope where available. Est
 | Path | Purpose |
 |---|---|
 | `server.py` | Standard-library web server for the UI and its JSON API |
-| `web/` | The QuakeTrace UI: guided replay, station audit, and the Google Maps, Earth 3D, and offline map views |
-| `quaketrace/api.py` | JSON payloads for the UI: fits, best-fit zones, leave-one-out runs, audit grid |
+| `web/` | The QuakeTrace UI: guided replay, station audit, solver lab, and the Google Maps, Earth 3D, and offline map views |
+| `quaketrace/api.py` | JSON payloads for the UI: fits, best-fit zones, solver grid traces, leave-one-out surfaces, audit grid |
 | `app.py` | Earlier Streamlit app, including World Explorer |
 | `quaketrace/` | Fixture loading, location fit, station audit, maps, and live catalog exploration |
 | `scripts/fetch_fixtures.py` | Public source download, parsing, validation, and fixture generation |

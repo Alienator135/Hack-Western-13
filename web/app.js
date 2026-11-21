@@ -1,5 +1,6 @@
 import { createMapView } from "./map.js";
 import { timelineChart, travelTimeChart, waveformChart } from "./charts.js";
+import { LabCanvas, LEGEND_TICKS, drawMiniHeat, legendGradient, misfitT } from "./lab.js";
 
 // ---------------------------------------------------------------- helpers
 
@@ -31,6 +32,7 @@ const state = {
   audit: { station: null, onset: null, offset: 3, result: null, inspected: null, ran: false },
   decisions: store.get("qt.decisions", []),
   maps: [],
+  lab: { event: null, station: null, offset: 0, exclude: null, secret: false, mode: "search", data: null, runs: null, played: false },
 };
 
 function setStatus(kind, text) {
@@ -84,7 +86,11 @@ function errorView(error) {
   render(`<div class="error-box"><strong>QuakeTrace could not load data.</strong> ${esc(error.message)}<br>Start the server from the repository root with <code>python server.py</code>, then reload.</div>`);
 }
 
-function currentView() { return location.hash.startsWith("#/audit") ? "audit" : "replay"; }
+function currentView() {
+  if (location.hash.startsWith("#/audit")) return "audit";
+  if (location.hash.startsWith("#/lab")) return "lab";
+  return "replay";
+}
 
 // ---------------------------------------------------------------- shared UI pieces
 
@@ -202,6 +208,7 @@ function renderTamper() {
         </div>
         <button class="btn-primary" type="button" data-action="lock">${LOCK}Lock it in</button>
         <button class="btn-link" type="button" data-action="secret">Let the app pick secretly</button>
+        <button class="btn-link" type="button" data-action="to-lab" style="padding-top:0;color:var(--muted)">How does it locate a quake? Open the solver lab</button>
       </div></section>
     </div>
     ${details([
@@ -247,6 +254,7 @@ function renderDamage() {
           <div class="legend-teal"><span></span>Teal = where the quake best fits</div>
         </div>
         <button class="btn-primary" type="button" data-step="investigate">Find the bad clock${ARROW}</button>
+        <button class="btn-link" type="button" data-action="to-lab">Watch the solver test every grid point</button>
       </section>
     </div>
     ${details([
@@ -318,6 +326,7 @@ function renderInvestigate() {
           <p style="margin:8px 4px 4px;font-size:13px;color:var(--ink-2)">${text}</p>
         </div>
         <button class="btn-primary" type="button" data-step="reveal">Reveal the answer${ARROW}</button>
+        <button class="btn-link" type="button" data-action="to-lab">See all ${n} refits as heatmaps</button>
       </section>
     </div>
     ${details([
@@ -380,6 +389,7 @@ function renderReveal() {
           ? `<button class="btn-primary" type="button" data-action="to-audit">Check ${esc(short(s))} across 7 quakes${ARROW}</button>`
           : `<a class="btn-primary" href="#/audit">Open the station audit${ARROW}</a>`}
         <button class="btn-link" type="button" data-action="again">Try another clock</button>
+        <button class="btn-link" type="button" data-action="to-lab" style="padding-top:0">Open this scenario in the solver lab</button>
       </section>
     </div>
     ${details([
@@ -542,15 +552,262 @@ async function showAudit() {
   } catch (error) { errorView(error); }
 }
 
+// ---------------------------------------------------------------- solver lab
+
+const LAB_MODES = [["search", "Grid search"], ["heatmap", "Misfit heatmap"], ["waves", "Wavefronts"]];
+
+function labQuery(extra = {}) {
+  const l = state.lab;
+  return new URLSearchParams({ event: l.event, station: l.offset ? l.station || "" : "", offset: String(l.offset), ...extra });
+}
+
+async function loadLab() {
+  const l = state.lab;
+  const key = labQuery().toString();
+  const [data, runs] = await Promise.all([
+    getJSON(`/api/lab?${labQuery({ exclude: l.exclude || "" })}`),
+    l.runs && l.runsKey === key ? l.runs : getJSON(`/api/lab/runs?${key}`),
+  ]);
+  l.data = data;
+  l.runs = runs;
+  l.runsKey = key;
+  l.played = false;
+}
+
+function labPhaseText(phase, lab) {
+  const coarse = lab.coarse.rms.length, fine = lab.fine.rms.length;
+  return {
+    idle: "Ready to search.",
+    coarse: `Coarse pass: testing a ${lab.coarse.stepKm} km grid of ${coarse.toLocaleString()} candidate epicentres. For each one, QuakeTrace predicts every station's arrival at ${lab.model.speedKmS} km/s and measures how badly the real picks disagree.`,
+    zoom: "Coarse winner found. Zooming in on a 6 km square around it.",
+    fine: `Fine pass: ${fine} candidates on a ${lab.fine.stepKm * 1000} m grid around the coarse winner.`,
+    done: `Done. The lowest misfit, ${lab.fit.rmsS.toFixed(2)} s, is ${lab.usgsKm.toFixed(1)} km from the official USGS epicentre.`,
+  }[phase];
+}
+
+function labStatsHtml(lab) {
+  return `
+    <div class="stat-label">Candidate epicentres tested</div>
+    <div class="stat-big" id="lab-tested">0</div>
+    <div class="grid2" style="margin-top:16px">
+      <div><div class="label">Best misfit so far</div><div class="stat-mid" style="font-size:24px" id="lab-best">—</div></div>
+      <div><div class="label">Best fit to USGS</div><div class="stat-mid" style="font-size:24px" id="lab-usgs">—</div></div>
+    </div>
+    <p class="lab-phase" id="lab-phase">${esc(labPhaseText("idle", lab))}</p>`;
+}
+
+function labWavesHtml(lab) {
+  const rows = lab.stations.map((s) => {
+    const gap = s.pickS - s.predictedS;
+    const out = s.excluded ? ' <span class="c-orange">out</span>' : "";
+    return `<tr data-wave-row="${esc(s.id)}"><td>${esc(s.short)}${out}</td><td class="r">${s.predictedS.toFixed(1)}</td><td class="r">${s.pickS.toFixed(1)}</td><td class="r ${Math.abs(gap) >= 1.5 ? "c-orange" : ""}">${sign(gap, 2)}</td></tr>`;
+  }).join("");
+  return `
+    <div class="stat-label">Seconds after the quake</div>
+    <div class="stat-big" id="wave-t">0.0 s</div>
+    <table class="table lab-wave-table">
+      <thead><tr><th>Station</th><th class="r">Expected</th><th class="r">Recorded</th><th class="r">Gap</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="note">Blue pulse: the model's P wave reaches the station. Orange pulse: the station's clock says it recorded the wave.</p>`;
+}
+
+function renderLab() {
+  const l = state.lab;
+  const lab = l.data;
+  const runs = l.runs;
+  const ev = eventById(l.event);
+  const best = runs.runs[0];
+  const secret = l.secret;
+  const scenarioText = secret ? "Judge's secret shift" : l.offset ? `${l.station} shifted ${sign(l.offset)} s` : "Real arrivals, no shift";
+  const sub = `${lab.pointsTested.toLocaleString()} candidate epicentres tested in ${lab.elapsedMs} ms · ${esc(ev.label)}${ev.isMainshock ? ` · M${ev.magnitude}` : ""} · ${esc(scenarioText)}${l.exclude ? ` · ${esc(short(l.exclude))} left out` : ""}`;
+  const stations = lab.stations.map((s) => s.id);
+  const ticks = LEGEND_TICKS.map((v) => `<span style="left:${(misfitT(v) * 100).toFixed(1)}%">${v}</span>`).join("");
+  const stationOptions = secret ? "<option>• • •</option>" : stations.map((id) => `<option ${id === l.station ? "selected" : ""}>${esc(id)}</option>`).join("");
+  render(`
+    ${headline("Watch the solver find the quake.", sub)}
+    <form class="card pad lab-controls" id="lab-form">
+      <div class="field"><label for="lab-ev">Earthquake</label><select id="lab-ev" class="select small">${state.overview.events.map((e) => `<option value="${e.id}" ${e.id === l.event ? "selected" : ""}>${esc(e.label)}${e.isMainshock ? " · mainshock" : ""}</option>`).join("")}</select></div>
+      <div class="field"><label for="lab-st">Shift a clock</label><select id="lab-st" class="select small mono" ${secret ? "disabled" : ""}>${stationOptions}</select></div>
+      <div class="field"><div class="range-head"><label for="lab-sh">Shift</label><span class="mono c-orange" id="lab-sh-value">${secret ? "• • •" : `${sign(l.offset)} s`}</span></div><input id="lab-sh" type="range" min="-10" max="10" step="0.5" value="${secret ? 0 : l.offset}" ${secret ? "disabled" : ""}></div>
+      <div class="field"><label for="lab-ex">Leave out</label><select id="lab-ex" class="select small mono"><option value="">Nobody · all ${stations.length}</option>${stations.map((id) => `<option value="${id}" ${id === l.exclude ? "selected" : ""}>${esc(id)}</option>`).join("")}</select></div>
+      <div style="display:flex;gap:8px;align-items:end">
+        <button class="btn-primary" type="submit" style="height:40px;font-size:14px">Run solver</button>
+        ${secret ? '<button class="btn-plain" type="button" data-action="lab-unsecret" style="height:40px">Show secret</button>' : ""}
+      </div>
+    </form>
+    <div class="row">
+      <section class="main-col card map-card">
+        <div class="lab-tabs" role="tablist" aria-label="Lab view">${LAB_MODES.map(([key, label]) => `<button type="button" role="tab" data-lab-mode="${key}" aria-selected="${key === l.mode}">${label}</button>`).join("")}</div>
+        <div class="lab-stage" id="lab-stage"><div class="lab-tip" id="lab-tip" hidden></div></div>
+        <div class="lab-bar">
+          <div class="lab-buttons" id="lab-buttons"></div>
+          <div class="lab-legend" aria-label="Misfit colour scale"><div class="label">RMS misfit (s) · dark = arrivals agree</div><div class="lab-ramp" style="background:${legendGradient()}"></div><div class="lab-ticks">${ticks}</div></div>
+        </div>
+      </section>
+      <section class="side-col">
+        <div class="card pad" id="lab-side"></div>
+        <div class="card pad lab-how">
+          <div class="kicker" style="color:var(--muted)">HOW IT WORKS</div>
+          <ol>
+            <li>Guess an epicentre on a grid across the search area.</li>
+            <li>Predict when the P wave reaches each station from that guess (${lab.model.speedKmS} km/s, ${lab.model.depthKm} km deep).</li>
+            <li>Compare with the recorded picks. After solving for the best origin time, the RMS of the disagreement is the misfit.</li>
+            <li>Keep the lowest-misfit guess, then repeat on a finer grid around it.</li>
+          </ol>
+        </div>
+      </section>
+    </div>
+    <section class="card pad">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+        <h2 style="margin:0;font-size:18px">Leave one out: ${runs.runs.length} refits</h2>
+        <span class="c-muted" style="font-size:13px">Each map drops one station and searches again. A lying clock is the one whose removal makes the bowl deep and tight.</span>
+      </div>
+      <div class="multiples">
+        <figure class="mini ${!l.exclude ? "active" : ""}" data-lab-exclude=""><canvas aria-label="Misfit map with all stations"></canvas><figcaption><span>All stations</span><span class="mono">${runs.all.fit.rmsS.toFixed(2)} s</span></figcaption></figure>
+        ${runs.runs.map((run, i) => `<figure class="mini ${i === 0 ? "best" : ""} ${l.exclude === run.station ? "active" : ""}" data-lab-exclude="${esc(run.station)}"><canvas aria-label="Misfit map without ${esc(run.station)}"></canvas><figcaption><span>without ${esc(run.short)}</span><span class="mono">${run.fit.rmsS.toFixed(2)} s</span></figcaption></figure>`).join("")}
+      </div>
+      <p class="note">Number = best RMS misfit of the remaining stations. Click a map to load that refit above. Blue ring = best fit · star = USGS · orange = station left out.</p>
+    </section>
+    ${details([
+      { title: "Arrival timing at the best fit", body: `<div class="det-body scroll-x"><table class="table"><thead><tr><th>Station</th><th>Site</th><th class="r">Distance</th><th class="r">Expected</th><th class="r">Recorded</th><th class="r">Gap</th></tr></thead><tbody>
+        ${lab.stations.map((s) => `<tr><td>${esc(s.id)}</td><td style="font-family:var(--sans)">${esc(s.name)}</td><td class="r">${s.epicentralKm.toFixed(1)} km</td><td class="r">${s.predictedS.toFixed(2)} s</td><td class="r">${s.pickS.toFixed(2)} s</td><td class="r">${sign(s.pickS - s.predictedS, 2)} s${s.excluded ? " · left out" : ""}</td></tr>`).join("")}
+      </tbody></table><p class="note">Times after the fitted origin time. Expected = straight-ray travel time at ${lab.model.speedKmS} km/s from ${lab.model.depthKm} km depth.</p></div>` },
+      { title: "The search, in numbers", body: `<div class="det-body kv">
+        <span>coarse grid</span><span>${lab.coarse.lats.length} × ${lab.coarse.lons.length} points every ${lab.coarse.stepKm} km</span>
+        <span>fine grid</span><span>${lab.fine.lats.length} × ${lab.fine.lons.length} points every ${lab.fine.stepKm * 1000} m around the coarse winner</span>
+        <span>misfit</span><span>RMS of (pick − travel time − origin), with origin = mean over stations</span>
+        <span>search area</span><span>${lab.region.south.toFixed(2)}° to ${lab.region.north.toFixed(2)}° N, ${Math.abs(lab.region.west).toFixed(2)}° to ${Math.abs(lab.region.east).toFixed(2)}° W</span>
+        <span>compute time</span><span>${lab.elapsedMs} ms for this view on the server</span>
+      </div>` },
+    ])}
+  `);
+  mountLab();
+}
+
+function mountLab() {
+  const l = state.lab;
+  const lab = l.data;
+  const stage = $("#lab-stage");
+  const tip = $("#lab-tip");
+  const canvas = new LabCanvas(stage, state.overview, {
+    onHover(info) {
+      if (!info || (!info.cell && !info.station)) { tip.hidden = true; return; }
+      let html = "";
+      if (info.station) {
+        const s = info.station;
+        html = `<strong>${esc(s.id)}</strong> · ${esc(s.name)}<br>expected ${s.predictedS.toFixed(2)} s · recorded ${s.pickS.toFixed(2)} s`;
+      } else if (info.cell && canvas.mode !== "waves") {
+        html = `<strong>RMS ${info.cell.rms.toFixed(2)} s</strong><br>If the quake were here (${info.cell.lat.toFixed(3)}°, ${info.cell.lon.toFixed(3)}°), the arrivals would disagree by ${info.cell.rms.toFixed(2)} s on average.`;
+      }
+      if (!html) { tip.hidden = true; return; }
+      tip.innerHTML = html;
+      tip.hidden = false;
+      tip.style.left = `${Math.max(8, Math.min(info.x + 14, info.width - 260))}px`;
+      tip.style.top = `${info.y + 18}px`;
+    },
+    onTick(progress) {
+      const tested = $("#lab-tested");
+      if (!tested) return;
+      tested.textContent = progress.tested.toLocaleString();
+      $("#lab-best").textContent = progress.best ? `${progress.best.rms.toFixed(2)} s` : "—";
+      $("#lab-usgs").textContent = progress.phase === "done" ? `${lab.usgsKm.toFixed(1)} km` : "—";
+      $("#lab-phase").textContent = labPhaseText(progress.phase, lab);
+    },
+  });
+  canvas.revealSuspect = !l.secret && Boolean(l.offset);
+  canvas.setData(lab);
+  state.labCanvas = canvas;
+  state.maps.push(canvas); // destroyed with the view
+  setLabMode(l.mode, { autoplay: !l.played });
+
+  const ev = eventById(l.event);
+  document.querySelectorAll(".mini").forEach((figure) => {
+    const exclude = figure.dataset.labExclude;
+    const surface = exclude ? l.runs.runs.find((run) => run.station === exclude) : l.runs.all;
+    drawMiniHeat(figure.querySelector("canvas"), l.runs, surface, { stations: lab.stations, excluded: exclude || null, usgs: ev });
+  });
+
+}
+
+function setLabMode(mode, { autoplay = false } = {}) {
+  const l = state.lab;
+  const canvas = state.labCanvas;
+  const lab = l.data;
+  l.mode = mode;
+  document.querySelectorAll("[data-lab-mode]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.labMode === mode)));
+  const side = $("#lab-side");
+  const buttons = $("#lab-buttons");
+  if (mode === "search") {
+    side.innerHTML = labStatsHtml(lab);
+    buttons.innerHTML = '<button class="btn-plain" type="button" data-action="lab-play">▶ Run the search</button><button class="btn-plain" type="button" data-action="lab-skip">Skip to result</button>';
+    if (autoplay) { l.played = true; canvas.playSearch(); } else canvas.playSearch({ instant: true });
+  } else if (mode === "heatmap") {
+    side.innerHTML = labStatsHtml(lab);
+    canvas.setMode("heatmap");
+    $("#lab-tested").textContent = lab.pointsTested.toLocaleString();
+    $("#lab-best").textContent = `${lab.fit.rmsS.toFixed(2)} s`;
+    $("#lab-usgs").textContent = `${lab.usgsKm.toFixed(1)} km`;
+    $("#lab-phase").textContent = `Every tested point, coloured by misfit. Contours mark 0.5, 1, 2 and 4 s. Hover anywhere to read the misfit if the quake had been there.${lab.fit.rmsS > 1 ? ` Nowhere fits better than ${lab.fit.rmsS.toFixed(2)} s: at least one clock disagrees with the rest.` : ""}`;
+    buttons.innerHTML = "";
+  } else {
+    side.innerHTML = labWavesHtml(lab);
+    const end = canvas.waveEnd();
+    buttons.innerHTML = `<button class="btn-plain" type="button" data-action="lab-waves">▶ Play</button><input type="range" id="wave-scrub" min="0" max="${end}" step="0.05" value="0" aria-label="Seconds after the quake">`;
+    canvas.setWaveTime(0);
+    updateWaveSide(0);
+    if (autoplay) playWaves(0);
+  }
+}
+
+function updateWaveSide(t) {
+  const label = $("#wave-t");
+  if (!label) return;
+  label.textContent = `${t.toFixed(1)} s`;
+  const scrub = $("#wave-scrub");
+  if (scrub && document.activeElement !== scrub) scrub.value = String(t);
+  for (const s of state.lab.data.stations) {
+    const row = document.querySelector(`[data-wave-row="${CSS.escape(s.id)}"]`);
+    if (!row) continue;
+    row.classList.toggle("reached", t >= s.predictedS);
+    row.classList.toggle("recorded", t >= s.pickS);
+  }
+}
+
+function playWaves(from) {
+  const canvas = state.labCanvas;
+  const start = from >= canvas.waveEnd() ? 0 : from;
+  canvas.playWaves(start, { speed: 3, onTime: (t) => updateWaveSide(t) });
+}
+
+async function showLab() {
+  const l = state.lab;
+  l.event ||= state.overview.mainshock;
+  l.station ||= state.overview.waveformStation;
+  try {
+    if (!l.data) await loadLab();
+    renderLab();
+  } catch (error) { errorView(error); }
+}
+
 // ---------------------------------------------------------------- events
 
 document.addEventListener("click", async (event) => {
-  const target = event.target.closest("[data-step],[data-action],[data-run],[data-inspect],[data-decide]");
+  const target = event.target.closest("[data-step],[data-action],[data-run],[data-inspect],[data-decide],[data-lab-mode],[data-lab-exclude]");
   if (!target || !$("#view").contains(target)) return;
   const r = state.replay;
   const a = state.audit;
   try {
-    if (target.dataset.step) {
+    if (target.dataset.labMode) {
+      setLabMode(target.dataset.labMode, { autoplay: target.dataset.labMode === "waves" });
+    } else if (target.dataset.labExclude !== undefined) {
+      state.lab.exclude = target.dataset.labExclude || null;
+      state.lab.mode = "heatmap";
+      await loadLab();
+      state.lab.played = true;
+      renderLab();
+      $("#lab-stage")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (target.dataset.step) {
       await goStep(target.dataset.step);
     } else if (target.dataset.run) {
       r.run = r.run === target.dataset.run ? null : target.dataset.run;
@@ -609,6 +866,22 @@ document.addEventListener("click", async (event) => {
         download(`quaketrace-${r.result.event.id}.png`, url);
       } else if (action === "csv") {
         exportCSV();
+      } else if (action === "lab-play") {
+        state.labCanvas.playSearch({ force: true });
+      } else if (action === "lab-skip") {
+        state.labCanvas.playSearch({ instant: true });
+      } else if (action === "lab-waves") {
+        playWaves(state.labCanvas.waveT);
+      } else if (action === "lab-unsecret") {
+        state.lab.secret = false;
+        renderLab();
+      } else if (action === "to-lab") {
+        const res = r.result || r.clean;
+        Object.assign(state.lab, {
+          event: r.event, station: res?.scenario.station || r.station, offset: res?.scenario.offsetS || 0,
+          secret: r.secret && r.step !== "reveal", exclude: null, mode: "search", data: null,
+        });
+        location.hash = "#/lab";
       }
     }
   } catch (error) {
@@ -627,6 +900,12 @@ document.addEventListener("input", (event) => {
     $("#a3-value").textContent = `${sign(state.audit.offset)} s`;
   } else if (event.target.id === "dim") {
     state.dim = Number(event.target.value);
+  } else if (event.target.id === "lab-sh") {
+    $("#lab-sh-value").textContent = `${sign(Number(event.target.value))} s`;
+  } else if (event.target.id === "wave-scrub") {
+    const t = Number(event.target.value);
+    state.labCanvas.setWaveTime(t);
+    updateWaveSide(t);
   }
 });
 
@@ -636,6 +915,14 @@ document.addEventListener("change", async (event) => {
     r.event = event.target.value;
     r.station = null; r.secret = false; r.result = null; r.maxStep = 1;
     await goStep("tamper");
+  } else if (event.target.id === "lab-ev") {
+    const l = state.lab;
+    const ids = eventById(event.target.value).stations;
+    l.event = event.target.value;
+    if (!ids.includes(l.station)) l.station = ids.includes(state.overview.waveformStation) ? state.overview.waveformStation : ids[0];
+    if (!ids.includes(l.station)) l.offset = 0;
+    l.exclude = null; l.secret = false; l.mode = "search";
+    try { await loadLab(); renderLab(); } catch (error) { errorView(error); }
   } else if (event.target.id === "st") {
     r.station = event.target.value;
   } else if (event.target.id === "dim") {
@@ -644,6 +931,19 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.id === "lab-form") {
+    event.preventDefault();
+    const l = state.lab;
+    l.event = $("#lab-ev").value;
+    if (!l.secret) {
+      l.station = $("#lab-st").value;
+      l.offset = Number($("#lab-sh").value);
+    }
+    l.exclude = $("#lab-ex").value || null;
+    l.mode = "search";
+    try { await loadLab(); renderLab(); } catch (error) { errorView(error); }
+    return;
+  }
   if (event.target.id !== "audit-form") return;
   event.preventDefault();
   const a = state.audit;
@@ -690,6 +990,7 @@ function setupAbout() {
 async function route() {
   if (!state.overview) return;
   if (currentView() === "audit") await showAudit();
+  else if (currentView() === "lab") await showLab();
   else await goStep(state.replay.result ? state.replay.step : "tamper");
 }
 

@@ -123,6 +123,37 @@ def fit_location(readings: tuple[Reading, ...]) -> Fit:
     )
 
 
+@dataclass(frozen=True)
+class SearchPass:
+    east: np.ndarray
+    north: np.ndarray
+    rms: np.ndarray  # shape (len(north), len(east))
+    step_km: float
+
+
+@dataclass(frozen=True)
+class SearchTrace:
+    coarse: SearchPass
+    fine: SearchPass
+    fit: Fit
+
+
+def search_trace(readings: tuple[Reading, ...]) -> SearchTrace:
+    """Every grid point fit_location evaluates, with its misfit, in both passes."""
+    fit = fit_location(readings)
+    coarse_east, coarse_north = _axis(X_MIN, X_MAX, 2), _axis(Y_MIN, Y_MAX, 2)
+    coarse = misfit_surface(readings, coarse_east, coarse_north)
+    row, col = np.unravel_index(int(np.argmin(coarse)), coarse.shape)
+    east, north = coarse_east[col], coarse_north[row]
+    fine_east = _axis(max(X_MIN, east - 3), min(X_MAX, east + 3), 0.25)
+    fine_north = _axis(max(Y_MIN, north - 3), min(Y_MAX, north + 3), 0.25)
+    return SearchTrace(
+        SearchPass(coarse_east, coarse_north, coarse, 2.0),
+        SearchPass(fine_east, fine_north, misfit_surface(readings, fine_east, fine_north), 0.25),
+        fit,
+    )
+
+
 def travel_time_s(location: StationLocation, station: StationLocation) -> float:
     """Model Pg travel time from an epicentre to a station."""
     x, y = project(location.latitude, location.longitude)

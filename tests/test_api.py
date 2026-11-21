@@ -65,6 +65,32 @@ class ApiPayloadTests(unittest.TestCase):
         self.assertAlmostEqual(pal["estimatedOffsetS"], 2.88, places=2)
         self.assertEqual(pal["simulated"], [False, False, False, False, True, True, True])
 
+    def test_lab_trace_matches_the_solver(self):
+        payload = api.lab(self.fixture, MAINSHOCK, "LD.PAL", 5.0)
+        json.dumps(payload)
+        coarse, fine = payload["coarse"], payload["fine"]
+        self.assertEqual(len(coarse["rms"]), len(coarse["lats"]) * len(coarse["lons"]))
+        self.assertEqual(payload["pointsTested"], len(coarse["rms"]) + len(fine["rms"]) + 1)
+        self.assertEqual(min(coarse["rms"]), coarse["best"]["rmsS"])
+        # The fine pass is centred on the coarse winner and finds the reported fit.
+        self.assertLessEqual(fine["lats"][0], coarse["best"]["lat"])
+        self.assertGreaterEqual(fine["lats"][-1], coarse["best"]["lat"])
+        self.assertAlmostEqual(fine["best"]["rmsS"], payload["fit"]["rmsS"], places=3)
+        self.assertAlmostEqual(payload["usgsKm"], 9.27, places=2)
+        excluded = api.lab(self.fixture, MAINSHOCK, "LD.PAL", 5.0, "LD.PAL")
+        self.assertAlmostEqual(excluded["usgsKm"], 2.79, places=2)
+        self.assertTrue(next(s for s in excluded["stations"] if s["id"] == "LD.PAL")["excluded"])
+
+    def test_lab_runs_rank_the_tampered_station_first(self):
+        payload = api.lab_runs(self.fixture, MAINSHOCK, "LD.PAL", 5.0)
+        self.assertEqual(payload["runs"][0]["station"], "LD.PAL")
+        self.assertEqual(len(payload["runs"]), 9)
+        size = len(payload["lats"]) * len(payload["lons"])
+        self.assertTrue(all(len(run["rms"]) == size for run in payload["runs"]))
+        self.assertLess(payload["runs"][0]["fit"]["rmsS"], payload["all"]["fit"]["rmsS"] / 3)
+        with self.assertRaises(ValueError):
+            api.lab(self.fixture, MAINSHOCK, None, 0.0, "XX.NOPE")
+
     def test_waveform_is_downsampled_with_pick(self):
         wave = api.waveform(self.fixture)
         self.assertLessEqual(len(wave["trace"]), 720)
@@ -97,6 +123,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["candidate"]["station"], "LD.PAL")
         status, _, body = self.get("/api/overview")
         self.assertEqual(len(json.loads(body)["events"]), 7)
+        _, _, body = self.get(f"/api/lab?event={MAINSHOCK}&station=LD.PAL&offset=5&exclude=LD.PAL")
+        self.assertEqual(json.loads(body)["scenario"]["exclude"], "LD.PAL")
+        _, _, body = self.get(f"/api/lab/runs?event={MAINSHOCK}")
+        self.assertEqual(len(json.loads(body)["runs"]), 9)
 
     def test_config_exposes_the_maps_key_from_the_environment(self):
         with patch.dict("os.environ", {server.GOOGLE_KEY_ENV: "test-key"}):

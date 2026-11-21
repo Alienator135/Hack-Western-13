@@ -56,6 +56,16 @@ def audit_json(station: str | None, onset: str | None, offset_s: float) -> bytes
     return json.dumps(api.audit_view(fixture(), station, onset, offset_s)).encode()
 
 
+@lru_cache(maxsize=128)
+def lab_json(event_id: str, station: str | None, offset_s: float, exclude: str | None) -> bytes:
+    return json.dumps(api.lab(fixture(), event_id, station, offset_s, exclude)).encode()
+
+
+@lru_cache(maxsize=64)
+def lab_runs_json(event_id: str, station: str | None, offset_s: float) -> bytes:
+    return json.dumps(api.lab_runs(fixture(), event_id, station, offset_s)).encode()
+
+
 def config_json() -> bytes:
     return json.dumps({
         "googleMapsKey": getenv(GOOGLE_KEY_ENV, ""),
@@ -82,6 +92,13 @@ def route(path: str, query: dict) -> bytes:
         offset = _offset(query)
         station = query.get("station", [None])[0] or None
         return replay_json(query.get("event", [MAINSHOCK])[0], station if offset else None, offset)
+    if path in ("/api/lab", "/api/lab/runs"):
+        offset = _offset(query)
+        station = query.get("station", [None])[0] or None
+        event_id = query.get("event", [MAINSHOCK])[0]
+        if path == "/api/lab/runs":
+            return lab_runs_json(event_id, station if offset else None, offset)
+        return lab_json(event_id, station if offset else None, offset, query.get("exclude", [None])[0] or None)
     if path == "/api/audit":
         offset = _offset(query)
         station = query.get("station", [None])[0] or None
