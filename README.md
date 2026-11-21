@@ -80,12 +80,14 @@ Pick a scenario at the top, or open the lab from any Replay step to carry the ju
 
 ## Three-minute demo
 
-1. **Real quake and tamper.** The map shows the nine stations that recorded the April 5 mainshock and QuakeTrace's own estimate. As the judge, choose a station and a clock shift, then select **Lock it in**. **Let the app pick secretly** chooses both without showing them.
-2. **Damage.** See how far the estimated epicentre moved and how the teal best-fit zone stretched. **Details** shows each station's residual and the fit statistics.
-3. **Investigate.** QuakeTrace refits without each station in turn. The arrival-time chart shows the suspect's reading against the expected 6 km/s line, and **Step through the runs** shows each refit on the map.
-4. **Reveal.** Compare the injected and found shifts and the error against the USGS epicentre with and without the suspect. Export the result as PNG or CSV.
-5. **Solver lab.** Select **Open this scenario in the solver lab**. Watch the grid search, play the wavefronts, and click the brightest leave-one-out map.
-6. **Station audit.** **Check PAL across 7 quakes** carries the shift into the audit from April 27. The heatmap and finding show when the clock broke and which GPS log window to review. **Judge controls** runs any other scenario, and **Mark as suspect** or **Dismiss** records a decision in this browser.
+The app opens on **Present**, a step-by-step walkthrough meant to be presented to judges. Press **F** for full screen and use **→ / Space** to advance, **←** to go back and **R** to replay a step's animation. Presentation clickers that send Page Down / Page Up also work.
+
+1. **The judge breaks a clock.** Hand over the laptop: they pick a station and a shift, or select **Let the app pick secretly**.
+2. **Walk through the 12 steps.** Each one has a sentence to say and an animation: stations and their arrival times, one candidate point, distance to a station, travel time at 6 km/s, the start time each station implies, the spread of start times as the point's score, scoring all 8,100 grid points, refining on a 250 m grid, the best point against USGS, leaving each station out in turn, and the culprit.
+3. **Reveal.** Injected against found shift, and the error against USGS with and without the suspect.
+4. **Close with the audit.** **When did PAL's clock break?** opens the station audit for the same station across seven quakes.
+
+**Replay**, **Station audit** and **Solver lab** remain in the header for questions.
 
 | Scenario | Result on the committed fixture |
 |---|---|
@@ -99,7 +101,7 @@ Pick a scenario at the top, or open the lab from any Replay step to carry the ju
 | Path | Purpose |
 |---|---|
 | `server.py` | Standard-library web server for the UI and its JSON API |
-| `web/` | The QuakeTrace UI: guided replay, station audit, solver lab, and the Google Maps, Earth 3D, and offline map views |
+| `web/` | The QuakeTrace UI: presenter walkthrough, guided replay, station audit, solver lab, and the Google Maps, Earth 3D, and offline map views |
 | `quaketrace/api.py` | JSON payloads for the UI: fits, best-fit zones, solver grid traces, leave-one-out surfaces, audit grid |
 | `app.py` | Earlier Streamlit app, including World Explorer |
 | `quaketrace/` | Fixture loading, location fit, station audit, maps, and live catalog exploration |

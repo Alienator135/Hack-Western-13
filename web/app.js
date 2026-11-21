@@ -1,6 +1,7 @@
 import { createMapView } from "./map.js";
 import { timelineChart, travelTimeChart, waveformChart } from "./charts.js";
 import { LabCanvas, LEGEND_TICKS, drawMiniHeat, legendGradient, misfitT } from "./lab.js";
+import { ExplainStage, buildSteps, deriveStory } from "./explain.js";
 
 // ---------------------------------------------------------------- helpers
 
@@ -32,6 +33,7 @@ const state = {
   audit: { station: null, onset: null, offset: 3, result: null, inspected: null, ran: false },
   decisions: store.get("qt.decisions", []),
   maps: [],
+  explain: { event: null, station: null, offset: 5, secret: false, step: -1, base: null, story: null, steps: null },
   lab: { event: null, station: null, offset: 0, exclude: null, secret: false, mode: "search", data: null, runs: null, played: false },
 };
 
@@ -88,8 +90,9 @@ function errorView(error) {
 
 function currentView() {
   if (location.hash.startsWith("#/audit")) return "audit";
+  if (location.hash.startsWith("#/replay")) return "replay";
   if (location.hash.startsWith("#/lab")) return "lab";
-  return "replay";
+  return "explain";
 }
 
 // ---------------------------------------------------------------- shared UI pieces
@@ -790,6 +793,155 @@ async function showLab() {
   } catch (error) { errorView(error); }
 }
 
+// ---------------------------------------------------------------- explain (presenter walkthrough)
+
+function explainQuery(extra = {}) {
+  const x = state.explain;
+  return new URLSearchParams({ event: x.event, station: x.offset ? x.station : "", offset: String(x.offset), ...extra });
+}
+
+async function loadExplain() {
+  const x = state.explain;
+  const q = explainQuery().toString();
+  const [replay, lab, runs] = await Promise.all([
+    getJSON(`/api/replay?${q}`), getJSON(`/api/lab?${q}`), getJSON(`/api/lab/runs?${q}`),
+  ]);
+  const suspect = replay.candidate?.station || runs.runs[0].station;
+  const labEx = await getJSON(`/api/lab?${explainQuery({ exclude: suspect })}`);
+  x.story = deriveStory({ lab, labEx, runs, replay });
+  x.steps = buildSteps(x.story);
+}
+
+async function showExplain() {
+  const x = state.explain;
+  x.event ||= state.overview.mainshock;
+  x.station ||= state.overview.waveformStation;
+  try {
+    if (!x.base) x.base = await getJSON(`/api/lab?event=${encodeURIComponent(x.event)}&offset=0`);
+    renderExplain();
+  } catch (error) { errorView(error); }
+}
+
+function renderExplain() {
+  const x = state.explain;
+  render(`
+    <div class="explain">
+      <section class="card explain-stage-card"><div id="explain-stage"></div></section>
+      <aside class="card pad explain-side" id="explain-side"></aside>
+    </div>
+    <p class="explain-keys">→ or Space: next · ←: back · R: replay animation · F: full screen</p>
+  `);
+  const stage = new ExplainStage($("#explain-stage"), state.overview);
+  state.explainStage = stage;
+  state.maps.push(stage);
+  if (x.story) stage.setStory(x.story, x.steps);
+  else stage.setStations(x.base);
+  explainGo(x.step, { animate: x.step >= 0 });
+}
+
+function explainSide() {
+  const x = state.explain;
+  const side = $("#explain-side");
+  if (!side) return;
+  const total = x.steps ? x.steps.length : 12;
+  const dots = Array.from({ length: total + 2 }, (_, i) => `<span class="${i - 1 === x.step ? "on" : i - 1 < x.step ? "done" : ""}"></span>`).join("");
+  if (x.step < 0) {
+    const ev = eventById(x.event);
+    const ids = ev.stations;
+    side.innerHTML = `
+      <div class="kicker">THE JUDGE'S TURN</div>
+      <p class="explain-say">Break one station's clock. QuakeTrace has to find which one.</p>
+      <div class="field"><label for="ex-st">Station</label><select id="ex-st" class="select mono" ${x.secret ? "disabled" : ""}>${x.secret ? "<option>• • •</option>" : ids.map((id) => `<option ${id === x.station ? "selected" : ""}>${esc(id)}</option>`).join("")}</select></div>
+      <div class="field" style="gap:8px"><div class="range-head"><label for="ex-sh">Clock shift</label><span class="shift-value" id="ex-sh-value">${x.secret ? "• • •" : `${sign(x.offset)} s`}</span></div>
+        <input id="ex-sh" type="range" min="-10" max="10" step="0.5" value="${x.secret ? 0 : x.offset}" ${x.secret ? "disabled" : ""}></div>
+      <button class="btn-primary" type="button" data-action="ex-lock">${LOCK}Lock it in</button>
+      <button class="btn-link" type="button" data-action="ex-secret">Let the app pick secretly</button>
+      <div class="explain-dots" aria-hidden="true">${dots}</div>`;
+    return;
+  }
+  if (x.step >= x.steps.length) {
+    const d = x.story;
+    const c = d.culprit;
+    const s = d.scenario.station;
+    const ok = (c && c.station === s) || (!c && !s);
+    const title = ok ? (s ? `Caught it. The judge changed ${short(s)}.` : "Correct. No clock was changed.")
+      : s ? `Missed. The judge changed ${short(s)}.` : "False alarm. No clock was changed.";
+    side.innerHTML = `
+      <div class="kicker ${ok ? "calm" : ""}">THE REVEAL</div>
+      <p class="explain-say">${esc(title)}</p>
+      <div class="grid2">
+        <div><div class="label">Injected</div><div class="stat-mid c-orange">${s ? `${sign(d.scenario.offsetS, 2)} s` : "none"}</div><div class="mono c-muted" style="font-size:13px">${esc(s || "")}</div></div>
+        <div><div class="label">Found</div><div class="stat-mid">${c ? `${sign(c.offsetS, 2)} s` : "—"}</div><div class="mono c-muted" style="font-size:13px">${esc(c?.station || "")}</div></div>
+      </div>
+      <div class="divider"><div class="label">Error vs USGS epicentre</div><div class="stat-mid"><span class="c-orange">${d.lab.usgsKm.toFixed(1)}</span>${c ? ` → <span class="c-blue">${d.labEx.usgsKm.toFixed(1)} km</span>` : " km"}</div></div>
+      ${s && state.overview.auditStations.includes(s) ? `<button class="btn-primary" type="button" data-action="ex-audit">When did ${esc(short(s))}'s clock break?${ARROW}</button>` : ""}
+      <div class="explain-nav"><button class="btn-plain" type="button" data-action="ex-back">← Back</button><button class="btn-plain" type="button" data-action="ex-restart">Start over</button></div>
+      <div class="explain-dots" aria-hidden="true">${dots}</div>`;
+    return;
+  }
+  const step = x.steps[x.step];
+  side.innerHTML = `
+    <div class="kicker" style="color:var(--blue-ink)">STEP ${x.step + 1} OF ${x.steps.length}</div>
+    <p class="explain-say">${esc(step.say)}</p>
+    <p class="explain-note">${esc(step.note)}</p>
+    <div class="explain-nav">
+      <button class="btn-plain" type="button" data-action="ex-back">← Back</button>
+      <button class="btn-plain" type="button" data-action="ex-replay" title="Replay animation (R)">↻</button>
+      <button class="btn-primary" type="button" data-action="ex-next">${x.step === x.steps.length - 1 ? "Reveal" : "Next"}${ARROW}</button>
+    </div>
+    <div class="explain-dots" aria-hidden="true">${dots}</div>`;
+}
+
+function explainGo(step, { animate = true } = {}) {
+  const x = state.explain;
+  const max = x.steps ? x.steps.length : -1;
+  x.step = Math.max(-1, Math.min(max, step));
+  const stage = state.explainStage;
+  if (stage && x.step >= 0) stage.show(Math.min(x.step, max - 1), { animate: animate && x.step < max });
+  else stage?.draw();
+  explainSide();
+}
+
+async function explainLock(secret) {
+  const x = state.explain;
+  if (secret) {
+    const ids = eventById(x.event).stations;
+    x.station = ids[Math.floor(Math.random() * ids.length)];
+    const magnitude = 3 + Math.floor(Math.random() * 7) * 0.5;
+    x.offset = Math.random() < 0.5 ? -magnitude : magnitude;
+    x.secret = true;
+  } else {
+    x.station = $("#ex-st").value;
+    x.offset = Number($("#ex-sh").value);
+  }
+  document.querySelectorAll("#explain-side button").forEach((b) => { b.disabled = true; });
+  await loadExplain();
+  state.explainStage.setStory(x.story, x.steps);
+  explainGo(0);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (currentView() !== "explain" || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.target.closest?.("input, select, textarea, dialog")) return;
+  const x = state.explain;
+  if (["ArrowRight", "PageDown", " "].includes(event.key)) {
+    event.preventDefault();
+    if (x.step >= 0) explainGo(x.step + 1);
+  } else if (["ArrowLeft", "PageUp"].includes(event.key)) {
+    event.preventDefault();
+    if (x.step >= 0) explainGo(x.step - 1);
+  } else if (event.key === "r" || event.key === "R") {
+    if (x.step >= 0) explainGo(x.step);
+  } else if (event.key === "f" || event.key === "F") {
+    toggleFullscreen();
+  }
+});
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
 // ---------------------------------------------------------------- events
 
 document.addEventListener("click", async (event) => {
@@ -866,6 +1018,22 @@ document.addEventListener("click", async (event) => {
         download(`quaketrace-${r.result.event.id}.png`, url);
       } else if (action === "csv") {
         exportCSV();
+      } else if (action === "ex-lock" || action === "ex-secret") {
+        await explainLock(action === "ex-secret");
+      } else if (action === "ex-next") {
+        explainGo(state.explain.step + 1);
+      } else if (action === "ex-back") {
+        explainGo(state.explain.step - 1);
+      } else if (action === "ex-replay") {
+        explainGo(state.explain.step);
+      } else if (action === "ex-restart") {
+        Object.assign(state.explain, { story: null, steps: null, step: -1, secret: false });
+        renderExplain();
+      } else if (action === "ex-audit") {
+        const sc = state.explain.story.scenario;
+        Object.assign(a, { station: sc.station, onset: state.overview.evaluationEvents[1], offset: Math.max(-5, Math.min(5, Math.round(sc.offsetS * 2) / 2)) });
+        await runAudit();
+        location.hash = "#/audit";
       } else if (action === "lab-play") {
         state.labCanvas.playSearch({ force: true });
       } else if (action === "lab-skip") {
@@ -900,6 +1068,8 @@ document.addEventListener("input", (event) => {
     $("#a3-value").textContent = `${sign(state.audit.offset)} s`;
   } else if (event.target.id === "dim") {
     state.dim = Number(event.target.value);
+  } else if (event.target.id === "ex-sh") {
+    $("#ex-sh-value").textContent = `${sign(Number(event.target.value))} s`;
   } else if (event.target.id === "lab-sh") {
     $("#lab-sh-value").textContent = `${sign(Number(event.target.value))} s`;
   } else if (event.target.id === "wave-scrub") {
@@ -991,6 +1161,7 @@ async function route() {
   if (!state.overview) return;
   if (currentView() === "audit") await showAudit();
   else if (currentView() === "lab") await showLab();
+  else if (currentView() === "explain") await showExplain();
   else await goStep(state.replay.result ? state.replay.step : "tamper");
 }
 
