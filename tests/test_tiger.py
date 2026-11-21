@@ -45,7 +45,9 @@ class TigerDataTests(unittest.TestCase):
                 if broken and "statement_timeout" not in statement:
                     raise psycopg.OperationalError("server closed the connection")
                 result = MagicMock()
-                if "sum(picks)" in statement:
+                if "GROUP BY month" in statement:
+                    result.fetchall.return_value = [(datetime(2024, 5, 1, tzinfo=UTC), "LD.PAL", 3, 0.2)]
+                elif "sum(picks)" in statement:
                     result.fetchall.return_value = [("LD.PAL", 179)]
                 elif "count(DISTINCT" in statement:
                     result.fetchone.return_value = (1, 1, 1, datetime(2024, 5, 1, tzinfo=UTC), datetime(2024, 5, 1, tzinfo=UTC))

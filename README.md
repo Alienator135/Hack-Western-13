@@ -101,13 +101,27 @@ Both seed commands are safe to rerun; existing rows are skipped.
 
 ### 5. Live updates (automatic)
 
-While `server.py` runs with Tiger connected, it checks the live USGS catalog every 10 minutes and streams newly published quakes and their station picks into the hypertable. The continuous aggregate is real-time, so new picks appear in **Every station's clock** on the next query, and the history card shows when the feed last checked and how many quakes have streamed in. The first check after seeding catches up everything since the bundled history ends (December 2025).
+While `server.py` runs with Tiger connected, it checks the live USGS catalog every 10 minutes and streams newly published quakes and their station picks into the hypertable. There are two feeds:
 
-Each check also rechecks the 30 days before Tiger's newest quake, because USGS often publishes phase data days after a quake. Runs are logged in `quaketrace.ingest_runs`.
+| Feed | Quakes | Roughly |
+|---|---|---|
+| `northeast` | North-east US, M1.0 and up | 1 a week |
+| `world` | Everywhere, M4.5 and up | 10–15 a day |
+
+The continuous aggregate is real-time, so new picks appear in **Every station's clock** on the next query. The history card has a **North-east US / Worldwide** switch and shows when the feed last checked and how many quakes streamed in during the last 24 hours. The first check after seeding catches up the north-east feed since the bundled history ends (December 2025) and the world feed's last 7 days.
+
+Each check also rechecks a window before Tiger's newest quake (30 days north-east, 7 days world), because USGS often publishes phase data after a quake. Quakes are saved in batches of 40, newest first, so a long backfill keeps its progress. Runs are logged in `quaketrace.ingest_runs`.
+
+**Optional: a year of worldwide history.** Run this once per Tiger service. It downloads about 7,800 quakes (roughly 600,000 picks) from USGS and takes about 3 hours because USGS rate-limits downloads. It saves the newest quakes first, so you can stop it at any time; rerun it to continue and to retry any quakes it skipped.
+
+```sh
+.venv/bin/python scripts/tiger_data.py ingest --feed world --backfill-days 365
+```
 
 | To | Run |
 |---|---|
-| Ingest once by hand | `.venv/bin/python scripts/tiger_data.py ingest` |
+| Ingest once by hand (both feeds) | `.venv/bin/python scripts/tiger_data.py ingest` |
+| Ingest one feed | `.venv/bin/python scripts/tiger_data.py ingest --feed world` |
 | Ingest every 5 minutes without the web server | `.venv/bin/python scripts/tiger_data.py ingest --watch 5` |
 | Change how often the server checks | `.venv/bin/python server.py --ingest-minutes 5` (or `QUAKETRACE_INGEST_MINUTES=5` in `.env`) |
 | Turn it off | `.venv/bin/python server.py --ingest-minutes 0` |
@@ -134,7 +148,7 @@ The Map, Satellite and Earth 3D views use [MapLibre GL JS](https://maplibre.org/
 ## What Tiger Data stores
 
 - **Years of station timing history.** Every north-east US earthquake since 2018 with published USGS phase data, and every arrival those solutions used, in the `quaketrace.picks` hypertable. It uses yearly chunks; chunks older than 180 days are compressed (columnstore, ordered by station, phase and time), and the `quaketrace.station_monthly` continuous aggregate keeps each station's monthly mean P-wave residual up to date. **Station audit → Every station's clock** reads the aggregate. When a judge breaks a clock in history, the same view is computed live from the raw hypertable, with the shift applied in SQL.
-- **Live quakes as USGS publishes them.** The server's live ingest adds each new north-east US quake with phase data to `quaketrace.events` (marked with `ingested_at`) and its picks to the same hypertable, so Tiger holds the only complete, up-to-date record. The bundled CSVs are the seed for a new service and the offline backup.
+- **Live quakes as USGS publishes them.** The server's live ingest adds each new north-east US quake (M1.0+) and each worldwide quake (M4.5+) with phase data to `quaketrace.events` (marked with `ingested_at`) and its picks to the same hypertable. Each row carries a `region` (`northeast` or `world`, from the quake's location), and `station_monthly` is grouped by region so the history card can show either view. Tiger holds the only complete, up-to-date record; the bundled CSVs (north-east only) are the seed for a new service and the offline backup.
 - **The seven demo quakes.** The 45 bundled arrivals used by Present, the Solver lab and the seven-quake audit, in `quaketrace.arrivals`.
 
 Connection settings are read from `QUAKETRACE_TIGER_DSN`, falling back to `TIMESCALE_SERVICE_URL`, plus the standard `PG*` variables. `seed-history --rebuild` drops and recreates only `picks`, `events` and `station_monthly`, and leaves the demo arrivals alone. The history bundle is built from USGS by `scripts/fetch_history.py`, which caches raw responses under `fixtures/raw/history` and backs off when USGS rate-limits. [Hypertables](https://www.tigerdata.com/docs/use-timescale/latest/hypertables/) · [Continuous aggregates](https://www.tigerdata.com/docs/use-timescale/latest/continuous-aggregates/) · [Compression](https://www.tigerdata.com/docs/use-timescale/latest/compression/)
@@ -150,6 +164,32 @@ Open **Solver lab** to show how QuakeTrace locates a quake. It draws the solver'
 
 Pick a scenario at the top of the lab. A secret scenario stays hidden until **Show secret**.
 
+## Benchmark
+
+Open **Benchmark** to show QuakeTrace holding up beyond the seven demo quakes. It relocates all 539 north-east US quakes from 2018–2025 that have at least 6 stations within 1.5°, after giving one random station a simulated clock error, and measures how far each method lands from the USGS epicentre:
+
+- **Naive fit:** every station, equal weights.
+- **Residual-weighted fit:** what standard locators do. Readings that don't fit lose weight; none beyond 1.5 s.
+- **QuakeTrace:** leave-one-out. It names the station to blame and refits without it.
+
+| Clock error | Naive | Weighted | QuakeTrace | Broken station named |
+|---|---|---|---|---|
+| none | 1.86 km | 1.95 km | 1.87 km | 8% false alarms |
+| ±1 s | 2.56 km | 2.56 km | 2.58 km | 9% |
+| ±2 s | 3.69 km | 2.51 km | 2.40 km | 59% |
+| ±3 s | 4.97 km | 2.28 km | 2.16 km | 84% |
+| ±5 s | 8.09 km | 2.33 km | 2.08 km | 95% |
+
+(Medians. The tab also shows means, the share within 5 km, and every quake where QuakeTrace did worse.)
+
+The honest reading: against the naive fit QuakeTrace wins clearly. Against residual weighting the location is close; QuakeTrace edges it on the median from ±2 s and on the mean at ±5 s (5.6 vs 6.6 km). The real difference is that QuakeTrace names the broken station (84% at ±3 s, 95% at ±5 s), while weighting works around it silently.
+
+It uses the app's own model and flag rules on a grid centred on each quake's first-reporting station, with station positions rebuilt from each reading's distance and azimuth. Results are precomputed into `fixtures/benchmark.json` (about 40 s):
+
+```sh
+.venv/bin/python scripts/run_benchmark.py
+```
+
 ## Three-minute demo
 
 The app opens on **Present**, a step-by-step walkthrough meant to be presented to judges. Press **F** for full screen and use **→ / Space** to advance, **←** to go back and **R** to replay a step's animation. Presentation clickers that send Page Down / Page Up also work.
@@ -159,7 +199,7 @@ The app opens on **Present**, a step-by-step walkthrough meant to be presented t
 3. **Reveal.** Injected against found shift, and the error against USGS with and without the suspect.
 4. **Scale it up with Tiger Data.** **Scale it up: every quake since 2018 in Tiger Data** injects the judge's shift into eight years of real station history and shows Tiger Data catch it, with the hypertable, compression and query time on screen. Point at the live-feed chip: Tiger keeps growing as USGS publishes new quakes, with no redeploy.
 
-**Station audit** also shows the seven-quake audit below the Tiger card, and **Solver lab** shows every grid point the solver tests. Both are there for judges' questions.
+**Station audit** also shows the seven-quake audit below the Tiger card, **Solver lab** shows every grid point the solver tests, and **Benchmark** answers "does this work beyond seven quakes?". All three are there for judges' questions.
 
 | Scenario | Result on the committed fixture |
 |---|---|
@@ -178,6 +218,9 @@ The app opens on **Present**, a step-by-step walkthrough meant to be presented t
 | `quaketrace/` | Fixture loading, location fit, station audit, multi-year history, and Tiger Data storage |
 | `scripts/fetch_history.py` | Downloads the multi-year USGS arrival history into `fixtures/history` |
 | `scripts/tiger_data.py` | Seeds Tiger Data with the demo arrivals and the history, and queries station health |
+| `quaketrace/benchmark.py` | Benchmark: relocates every eligible north-east quake with three methods |
+| `quaketrace/live.py` | Live USGS ingest into Tiger Data (north-east and worldwide feeds) |
+| `scripts/run_benchmark.py` | Precomputes `fixtures/benchmark.json` for the Benchmark tab |
 | `scripts/fetch_fixtures.py` | Public source download, parsing, validation, and fixture generation |
 | `fixtures/` | Seven event origins, 45 arrival and station-epoch records, waveform, local outlines, and provenance manifest. `fixtures/history` holds the multi-year history bundle |
 | `tests/` | Fixture integrity, parsers, solver, audit, history, Tiger Data, API and server |

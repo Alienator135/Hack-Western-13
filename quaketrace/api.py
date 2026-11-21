@@ -459,8 +459,17 @@ def _months_between(first: datetime, last: datetime) -> list[datetime]:
     return months
 
 
-def history_view(station: str | None = None, onset: str | None = None, offset_s: float = 0.0) -> dict:
-    """Station clock health across the multi-year history, from Tiger Data when configured."""
+HISTORY_REGIONS = ("northeast", "world")
+
+
+def history_view(
+    station: str | None = None, onset: str | None = None, offset_s: float = 0.0, region: str = "northeast",
+) -> dict:
+    """Station clock health across the multi-year history, from Tiger Data when configured.
+
+    region "northeast" uses north-east US quakes only; "world" adds worldwide M4.5+ quakes,
+    which only Tiger Data holds (the bundled copy is north-east only).
+    """
     from os import getenv  # noqa: PLC0415
 
     from .data import TIGER_DSN_ENV, utc  # noqa: PLC0415
@@ -469,6 +478,8 @@ def history_view(station: str | None = None, onset: str | None = None, offset_s:
     started = perf_counter()
     if not -MAX_SHIFT_S <= offset_s <= MAX_SHIFT_S:
         raise ValueError(f"Shift must be within ±{MAX_SHIFT_S:g} s.")
+    if region not in HISTORY_REGIONS:
+        raise ValueError("Region must be northeast or world.")
     onset_time = utc(f"{onset}T00:00:00+00:00") if onset else None
     shift = bool(offset_s and station and onset_time)
     wanted = [station] if station else []
@@ -481,10 +492,14 @@ def history_view(station: str | None = None, onset: str | None = None, offset_s:
             result = history_buckets(
                 dsn, limit=HISTORY_STATIONS, stations=wanted,
                 shifted_station=station if shift else None, onset=onset_time, offset_s=offset_s if shift else 0.0,
+                region=region,
             )
             source = "tiger"
         except TigerDataError as error:
             note = f"{error} Showing the bundled history instead."
+    if result is None and region == "world":
+        note = note or "The worldwide view needs Tiger Data. Showing the north-east history."
+        region = "northeast"
     if result is None:
         if not history_available():
             return {"available": False, "note": note or "Run scripts/fetch_history.py to build the history bundle."}
@@ -535,7 +550,7 @@ def history_view(station: str | None = None, onset: str | None = None, offset_s:
             "values": values, "counts": picks, "deviations": deviations,
         })
     return {
-        "available": True, "source": source, "query": query, "note": note,
+        "available": True, "source": source, "query": query, "note": note, "region": region,
         "stats": stats, "months": [month.isoformat() for month in months],
         "stations": rows,
         "scenario": {"station": station if shift else None, "onset": onset if shift else None, "offsetS": offset_s if shift else 0.0},

@@ -24,6 +24,17 @@ HISTORY_DIR = DEFAULT_FIXTURES / "history"
 EVENTS_FILE = "events.csv"
 PICKS_FILE = "picks.csv.gz"
 REGION = {"minlatitude": 38.0, "maxlatitude": 45.5, "minlongitude": -80.0, "maxlongitude": -68.0}
+# Events inside REGION belong to the north-east US history; everything else is "world".
+
+
+def region_of(latitude: float, longitude: float) -> str:
+    inside = (
+        REGION["minlatitude"] <= latitude <= REGION["maxlatitude"]
+        and REGION["minlongitude"] <= longitude <= REGION["maxlongitude"]
+    )
+    return "northeast" if inside else "world"
+
+
 DEFAULT_START = "2018-01-01"
 DEFAULT_END = "2026-01-01"
 MIN_MAGNITUDE = 1.0

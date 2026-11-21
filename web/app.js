@@ -3,6 +3,7 @@ import { timelineChart, travelTimeChart, waveformChart } from "./charts.js";
 import { LabCanvas, LEGEND_TICKS, drawMiniHeat, legendGradient, misfitT } from "./lab.js";
 import { ExplainStage, buildSteps, deriveStory } from "./explain.js";
 import { HistoryChart, historyLegend } from "./history.js";
+import { renderBenchmark } from "./benchmark.js";
 
 // ---------------------------------------------------------------- helpers
 
@@ -33,7 +34,8 @@ const state = {
   audit: { station: null, onset: null, offset: 3, result: null, inspected: null, ran: false },
   decisions: store.get("qt.decisions", []),
   maps: [],
-  history: { view: null, station: "LD.PAL", onset: "2024-04-27", offset: 3, applied: false, scrollTo: false },
+  benchmark: { data: null, shift: 3 },
+  history: { view: null, station: "LD.PAL", onset: "2024-04-27", offset: 3, applied: false, scrollTo: false, region: "northeast" },
   explain: { event: null, station: null, offset: 5, secret: false, step: -1, base: null, story: null, steps: null },
   lab: { event: null, station: null, offset: 0, exclude: null, secret: false, mode: "search", data: null, runs: null, played: false },
 };
@@ -93,6 +95,7 @@ function currentView() {
   if (location.hash.startsWith("#/audit")) return "audit";
   if (location.hash.startsWith("#/replay")) return "replay";
   if (location.hash.startsWith("#/lab")) return "lab";
+  if (location.hash.startsWith("#/benchmark")) return "benchmark";
   return "explain";
 }
 
@@ -547,10 +550,13 @@ function historyCardHtml() {
       <div class="history-head">
         <div>
           <div class="kicker" style="color:var(--blue-ink)">SCALE IT UP · TIGER DATA</div>
-          <h2>Every station's clock, every quake since 2018</h2>
+          <h2 id="history-title">Every station's clock, every quake since 2018</h2>
           <p class="c-muted">Each cell is one station's average P-wave timing error for a month, compared with its previous six active months. Orange runs late, blue runs early.</p>
         </div>
         <div class="history-source" id="history-source"></div>
+      </div>
+      <div class="seg history-region" role="group" aria-label="Which quakes">
+        ${[["northeast", "North-east US · M1+"], ["world", "Worldwide · M4.5+"]].map(([key, label]) => `<button type="button" data-action="history-region" data-region="${key}" aria-pressed="${h.region === key}">${label}</button>`).join("")}
       </div>
       <div class="history-stats" id="history-stats"><span class="c-muted">Loading history…</span></div>
       <form class="history-controls" id="history-form">
@@ -571,7 +577,7 @@ function historyCardHtml() {
 async function loadHistory() {
   const h = state.history;
   // Always include the chosen station as a row; only apply the shift once the judge runs it.
-  const params = new URLSearchParams(h.applied ? { station: h.station, onset: h.onset, offset: String(h.offset) } : { station: h.station });
+  const params = new URLSearchParams(h.applied ? { station: h.station, onset: h.onset, offset: String(h.offset), region: h.region } : { station: h.station, region: h.region });
   h.view = await getJSON(`/api/history?${params}`);
 }
 
@@ -600,10 +606,6 @@ function timeAgo(iso) {
   return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
 }
 
-function dayLabel(iso) {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-}
-
 function fillHistory() {
   const h = state.history;
   const view = h.view;
@@ -628,7 +630,7 @@ function fillHistory() {
     `<b>${s.events.toLocaleString()}</b> quakes`,
     `<b>${s.stations.toLocaleString()}</b> stations`,
     `${monthLabel(s.first)} – ${monthLabel(s.last)}`,
-    live ? `<b>+${live.eventsAdded.toLocaleString()}</b> quakes streamed in live${live.latestAdded ? ` · newest ${live.latestAdded.magnitude !== null ? `M${live.latestAdded.magnitude.toFixed(1)} ` : ""}${dayLabel(live.latestAdded.time)}` : ""}` : null,
+    live ? `<b>+${(live.lastDay ?? 0).toLocaleString()}</b> quakes in the last 24 h · ${live.eventsAdded.toLocaleString()} streamed in live${live.latestAdded ? ` · newest ${live.latestAdded.magnitude !== null ? `M${live.latestAdded.magnitude.toFixed(1)} ` : ""}${esc(live.latestAdded.place || "")}, ${timeAgo(live.latestAdded.time)}` : ""}` : null,
     tiger && s.chunks ? `hypertable: <b>${s.chunks}</b> chunks, ${s.compressedChunks} compressed${s.compressionRatio ? ` (${s.compressionRatio}× smaller)` : ""}` : null,
     `${esc(view.query)} · <b>${view.elapsedMs} ms</b>`,
   ].filter(Boolean);
@@ -651,7 +653,13 @@ function fillHistory() {
       ? `<strong>In the real data</strong>, ${flagged.map((row) => `${esc(row.station)} drifted ${sign(row.estimatedOffsetS)} s from ${monthLabel(row.firstFlag)}`).join("; ")}.`
       : `<strong>Real data:</strong> no station shows a sustained timing shift across ${s.events.toLocaleString()} quakes. Break one above to see Tiger catch it.`;
   }
+  if (view.note) result += `<br><span class="note">${esc(view.note)}</span>`;
   $("#history-result").innerHTML = result;
+  const world = view.region === "world";
+  $("#history-title").textContent = world
+    ? "Every station's clock, north-east quakes plus every M4.5+ quake worldwide"
+    : "Every station's clock, every quake since 2018";
+  document.querySelectorAll("[data-action=history-region]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.region === view.region)));
   const stage = $("#history-stage");
   const tip = $("#history-tip");
   state.historyChart?.destroy();
@@ -927,6 +935,16 @@ async function showLab() {
   } catch (error) { errorView(error); }
 }
 
+// ---------------------------------------------------------------- benchmark
+
+async function showBenchmark() {
+  const b = state.benchmark;
+  try {
+    b.data ||= await getJSON("/api/benchmark");
+    render(renderBenchmark(b.data, b.shift));
+  } catch (error) { errorView(error); }
+}
+
 // ---------------------------------------------------------------- explain (presenter walkthrough)
 
 function explainQuery(extra = {}) {
@@ -1167,6 +1185,15 @@ document.addEventListener("click", async (event) => {
         const sc = state.explain.story.scenario;
         Object.assign(state.history, { station: sc.station, onset: "2024-04-27", offset: Math.max(-5, Math.min(5, Math.round(sc.offsetS * 2) / 2)), applied: true, view: null, scrollTo: true });
         location.hash = "#/audit";
+      } else if (action === "bench-shift") {
+        state.benchmark.shift = Number(target.dataset.shift);
+        await showBenchmark();
+      } else if (action === "history-region") {
+        state.history.region = target.dataset.region;
+        state.history.view = null;
+        document.querySelectorAll("[data-action=history-region]").forEach((b) => b.setAttribute("aria-pressed", String(b === target)));
+        $("#history-stats").innerHTML = '<span class="c-muted">Loading history…</span>';
+        await mountHistory();
       } else if (action === "history-clear") {
         Object.assign(state.history, { applied: false, view: null });
         await mountHistory();
@@ -1289,6 +1316,7 @@ async function route() {
   if (!state.overview) return;
   if (currentView() === "audit") await showAudit();
   else if (currentView() === "lab") await showLab();
+  else if (currentView() === "benchmark") await showBenchmark();
   else if (currentView() === "explain") await showExplain();
   else await goStep(state.replay.result ? state.replay.step : "tamper");
 }

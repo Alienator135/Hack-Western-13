@@ -107,6 +107,15 @@ class ApiPayloadTests(unittest.TestCase):
         self.assertAlmostEqual(pal["estimatedOffsetS"], 3.0, delta=0.3)
         self.assertEqual(shifted["scenario"]["station"], "LD.PAL")
 
+    def test_world_history_without_tiger_falls_back_to_the_northeast_copy(self):
+        with patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("QUAKETRACE_TIGER_DSN", None)
+            view = api.history_view("LD.PAL", region="world")
+            with self.assertRaises(ValueError):
+                api.history_view(region="mars")
+        self.assertEqual((view["source"], view["region"]), ("local", "northeast"))
+        self.assertIn("needs Tiger Data", view["note"])
+
     def test_waveform_is_downsampled_with_pick(self):
         wave = api.waveform(self.fixture)
         self.assertLessEqual(len(wave["trace"]), 720)
@@ -143,6 +152,8 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["scenario"]["exclude"], "LD.PAL")
         _, _, body = self.get(f"/api/lab/runs?event={MAINSHOCK}")
         self.assertEqual(len(json.loads(body)["runs"]), 9)
+        _, _, body = self.get("/api/benchmark")
+        self.assertIn("3", json.loads(body)["summary"])
 
     def test_errors_are_json_and_paths_cannot_escape_web_root(self):
         for path, code in (("/api/replay?offset=abc", 400), ("/api/missing", 404), ("/..%2Fserver.py", 404)):

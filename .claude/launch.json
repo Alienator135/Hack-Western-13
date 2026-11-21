@@ -12,6 +12,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["server.py", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "quaketrace-mac-no-ingest",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["server.py", "--port", "8765", "--ingest-minutes", "0"],
+      "port": 8765
     }
   ]
 }

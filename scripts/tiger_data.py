@@ -14,7 +14,7 @@ from quaketrace.api import history_view
 from quaketrace.audit import audit
 from quaketrace.env import load_env
 from quaketrace.history import history_available, load_history
-from quaketrace.live import LOOKBACK_DAYS, ingest
+from quaketrace.live import BATCH, FEEDS, MAX_EVENTS_PER_RUN, ingest
 from quaketrace.data import AUDIT_STATIONS, EVALUATION_EVENTS, TIGER_DSN_ENV, WAVEFORM_STATION, load_fixture
 from quaketrace.tiger import (
     TigerDataError, read_demo_arrivals, seed_demo, seed_history, weekly_station_history,
@@ -38,8 +38,12 @@ def main() -> int:
              "so the current chunk and compression settings apply. The demo arrivals table is kept.",
     )
     ingest_parser = commands.add_parser("ingest", help="Add quakes USGS published since Tiger's newest one")
-    ingest_parser.add_argument("--lookback-days", type=float, default=LOOKBACK_DAYS,
-                               help="Also recheck this many days before the newest quake (late phase data)")
+    ingest_parser.add_argument("--feed", choices=(*FEEDS, "all"), default="all",
+                               help="northeast (M1.0+), world (M4.5+), or both (default)")
+    ingest_parser.add_argument("--lookback-days", type=float,
+                               help="Recheck this many days before the newest quake (late phase data)")
+    ingest_parser.add_argument("--backfill-days", type=float,
+                               help="Load every quake from this many days ago, e.g. 365 for a year of world data")
     ingest_parser.add_argument("--watch", type=float, metavar="MINUTES",
                                help="Keep running, checking USGS every MINUTES")
     health = commands.add_parser("health", help="Query monthly station clock health from Tiger Data")
@@ -93,19 +97,33 @@ def main() -> int:
             if not args.rebuild and (summary.get("compressionRatio") or 0) < 1.5 and summary.get("compressedChunks"):
                 print("Compression is barely saving space. Run seed-history --rebuild to apply the current settings.")
         elif args.command == "ingest":
+            feeds = list(FEEDS) if args.feed == "all" else [args.feed]
+
+            def progress(done, total, events, picks):
+                if total > BATCH:
+                    print(f"    {done:,}/{total:,} downloaded · {events:,} quakes, {picks:,} picks saved", flush=True)
+
             while True:
-                summary = ingest(dsn, lookback_days=args.lookback_days)
-                print(
-                    f"Checked {summary['checked']} USGS quakes from {summary['windowStart'][:10]} to "
-                    f"{summary['windowEnd'][:16]}Z · added {summary['newEvents']} quakes, {summary['newPicks']:,} picks."
-                )
-                for event in summary["added"]:
-                    magnitude = f"M{event['magnitude']:.1f}" if event["magnitude"] is not None else "M?"
-                    print(f"  + {event['time'][:16]}Z {magnitude:<5} {event['place']}  ({event['id']})")
-                if summary["error"]:
-                    print(summary["error"], file=sys.stderr)
+                for feed in feeds:
+                    summary = ingest(
+                        dsn, feed=feed, lookback_days=args.lookback_days, backfill_days=args.backfill_days,
+                        max_events=None if args.backfill_days else MAX_EVENTS_PER_RUN, progress=progress,
+                    )
+                    print(
+                        f"{feed}: checked {summary['checked']:,} USGS quakes from {summary['windowStart'][:10]} to "
+                        f"{summary['windowEnd'][:16]}Z · added {summary['newEvents']:,} quakes, {summary['newPicks']:,} picks.",
+                        flush=True,
+                    )
+                    for event in summary["added"][-10:]:
+                        magnitude = f"M{event['magnitude']:.1f}" if event["magnitude"] is not None else "M?"
+                        print(f"  + {event['time'][:16]}Z {magnitude:<5} {event['place']}  ({event['id']})")
+                    if len(summary["added"]) > 10:
+                        print(f"  ... and {len(summary['added']) - 10:,} earlier")
+                    if summary["error"]:
+                        print(summary["error"], file=sys.stderr)
                 if not args.watch:
                     break
+                args.backfill_days = None
                 time.sleep(args.watch * 60)
         elif args.command == "health":
             started = time.perf_counter()

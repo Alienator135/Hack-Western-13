@@ -77,9 +77,21 @@ def _offset(query: dict) -> float:
     return round(value, 2)
 
 
+BENCHMARK_FILE = Path(__file__).resolve().parent / "fixtures" / "benchmark.json"
+
+
+@lru_cache(maxsize=1)
+def benchmark_json() -> bytes:
+    if not BENCHMARK_FILE.is_file():
+        raise LookupError("Benchmark results are missing. Run scripts/run_benchmark.py.")
+    return BENCHMARK_FILE.read_bytes()
+
+
 def route(path: str, query: dict) -> bytes:
     if path == "/api/overview":
         return overview_json()
+    if path == "/api/benchmark":
+        return benchmark_json()
     if path == "/api/waveform":
         return waveform_json()
     if path == "/api/replay":
@@ -105,7 +117,8 @@ def route(path: str, query: dict) -> bytes:
         onset = query.get("onset", [None])[0] or None
         if onset and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", onset):
             raise ValueError("Onset must be a date like 2024-04-27.")
-        return json.dumps(api.history_view(station, onset, offset)).encode()
+        region = query.get("region", ["northeast"])[0] or "northeast"
+        return json.dumps(api.history_view(station, onset, offset, region)).encode()
     raise LookupError(path)
 
 
@@ -176,23 +189,24 @@ DEFAULT_INGEST_MINUTES = 10.0
 
 def _live_ingest(minutes: float):
     """Poll USGS for newly published quakes and add them to Tiger Data, forever."""
-    from quaketrace.live import ingest  # noqa: PLC0415
+    from quaketrace.live import FEEDS, ingest  # noqa: PLC0415
     from quaketrace.tiger import TigerDataError  # noqa: PLC0415
 
     while True:
-        try:
-            summary = ingest(getenv(TIGER_DSN_ENV))
-            if summary["error"]:
-                logger.warning("Live ingest: %s", summary["error"])
-            else:
-                logger.info(
-                    "Live ingest: checked %d USGS quakes, added %d quakes and %d picks",
-                    summary["checked"], summary["newEvents"], summary["newPicks"],
-                )
-        except TigerDataError as error:
-            logger.warning("Live ingest: %s", error)
-        except Exception:  # noqa: BLE001 - keep the loop alive for the demo
-            logger.exception("Live ingest failed")
+        for feed in FEEDS:
+            try:
+                summary = ingest(getenv(TIGER_DSN_ENV), feed=feed)
+                if summary["error"]:
+                    logger.warning("Live ingest (%s): %s", feed, summary["error"])
+                else:
+                    logger.info(
+                        "Live ingest (%s): checked %d USGS quakes, added %d quakes and %d picks",
+                        feed, summary["checked"], summary["newEvents"], summary["newPicks"],
+                    )
+            except TigerDataError as error:
+                logger.warning("Live ingest (%s): %s", feed, error)
+            except Exception:  # noqa: BLE001 - keep the loop alive for the demo
+                logger.exception("Live ingest (%s) failed", feed)
         time.sleep(minutes * 60)
 
 

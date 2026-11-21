@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import psycopg
 
 from .data import AUDIT_STATIONS, Arrival, Fixture
+from .history import region_of
 
 SCHEMA = (
     "CREATE EXTENSION IF NOT EXISTS timescaledb",
@@ -220,12 +221,14 @@ STATION_MONTHLY = f"""
     WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
     SELECT time_bucket(INTERVAL '1 month', event_time) AS month,
            station_id,
+           region,
            count(*) AS picks,
+           sum(residual_s) AS sum_residual_s,
            avg(residual_s) AS mean_residual_s,
            stddev_samp(residual_s) AS spread_s
     FROM quaketrace.picks
     WHERE {P_FILTER}
-    GROUP BY month, station_id
+    GROUP BY month, station_id, region
     WITH NO DATA
 """
 
@@ -237,15 +240,17 @@ COPY_PICKS = """
 BUSIEST_STATIONS = """
     SELECT station_id, sum(picks)::bigint AS picks
     FROM quaketrace.station_monthly
+    WHERE region = ANY(%s)
     GROUP BY station_id
     ORDER BY picks DESC, station_id
     LIMIT %s
 """
 
 MONTHLY_FROM_AGGREGATE = """
-    SELECT month, station_id, picks, mean_residual_s
+    SELECT month, station_id, sum(picks)::bigint, sum(sum_residual_s) / sum(picks)
     FROM quaketrace.station_monthly
-    WHERE station_id = ANY(%s)
+    WHERE station_id = ANY(%s) AND region = ANY(%s)
+    GROUP BY month, station_id
     ORDER BY station_id, month
 """
 
@@ -256,7 +261,7 @@ MONTHLY_WITH_SHIFT = f"""
            avg(residual_s + CASE WHEN station_id = %(station)s AND event_time >= %(onset)s
                                  THEN %(offset)s ELSE 0 END) AS mean_residual_s
     FROM quaketrace.picks
-    WHERE {P_FILTER} AND station_id = ANY(%(stations)s)
+    WHERE {P_FILTER} AND station_id = ANY(%(stations)s) AND region = ANY(%(regions)s)
     GROUP BY month, station_id
     ORDER BY station_id, month
 """
@@ -264,6 +269,18 @@ MONTHLY_WITH_SHIFT = f"""
 HISTORY_TOTALS = """
     SELECT count(*), count(DISTINCT event_id), count(DISTINCT station_id), min(event_time), max(event_time)
     FROM quaketrace.picks
+    WHERE region = ANY(%s)
+"""
+
+# The bundled history is all north-east US, so existing rows default to it.
+REGION_COLUMNS = (
+    "ALTER TABLE quaketrace.events ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'northeast'",
+    "ALTER TABLE quaketrace.picks ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'northeast'",
+)
+
+MONTHLY_HAS_REGION = """
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'quaketrace' AND table_name = 'station_monthly' AND column_name = 'region'
 """
 
 CHUNK_COUNTS = """
@@ -307,7 +324,7 @@ def seed_history(dsn: str, events, picks, *, rebuild: bool = False) -> dict:
         if rebuild:
             for statement in REBUILD_HISTORY:
                 connection.execute(statement)
-        for statement in HISTORY_SCHEMA:
+        for statement in HISTORY_SCHEMA + REGION_COLUMNS:
             connection.execute(statement)
         with connection.transaction():
             connection.execute(
@@ -347,28 +364,47 @@ def seed_history(dsn: str, events, picks, *, rebuild: bool = False) -> dict:
             FROM show_chunks('quaketrace.picks', older_than => INTERVAL '180 days') AS chunk
             """
         ).fetchone()[0]
-        exists = connection.execute(
-            """
-            SELECT 1 FROM timescaledb_information.continuous_aggregates
-            WHERE view_schema = 'quaketrace' AND view_name = 'station_monthly'
-            """
-        ).fetchone()
-        if not exists:
-            connection.execute(STATION_MONTHLY)
-            connection.execute(
-                """
-                SELECT add_continuous_aggregate_policy('quaketrace.station_monthly',
-                    start_offset => INTERVAL '3 months', end_offset => INTERVAL '1 day',
-                    schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE)
-                """
-            )
+        ensure_station_monthly(connection, refresh=False)
         connection.execute("CALL refresh_continuous_aggregate('quaketrace.station_monthly', NULL, NULL)")
-        stats = history_stats(connection)
+        stats = history_stats(connection, ALL_REGIONS)
     return {"inserted_picks": inserted_picks, "events": len(events), "compressed_chunks": compressed, **stats}
 
 
-def history_stats(connection) -> dict:
-    picks, events, stations, first, last = connection.execute(HISTORY_TOTALS).fetchone()
+REGIONS = {"northeast": ("northeast",), "world": ("northeast", "world")}
+ALL_REGIONS = REGIONS["world"]
+
+
+def ensure_station_monthly(connection, *, refresh: bool = True) -> bool:
+    """Create the monthly continuous aggregate, rebuilding an older one without regions.
+
+    Returns True when it was (re)created. Call with autocommit on.
+    """
+    exists = connection.execute(
+        """
+        SELECT 1 FROM timescaledb_information.continuous_aggregates
+        WHERE view_schema = 'quaketrace' AND view_name = 'station_monthly'
+        """
+    ).fetchone()
+    if exists and connection.execute(MONTHLY_HAS_REGION).fetchone():
+        return False
+    if exists:
+        connection.execute("DROP MATERIALIZED VIEW quaketrace.station_monthly")
+    connection.execute(STATION_MONTHLY)
+    connection.execute(
+        """
+        SELECT add_continuous_aggregate_policy('quaketrace.station_monthly',
+            start_offset => INTERVAL '3 months', end_offset => INTERVAL '1 day',
+            schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE)
+        """
+    )
+    if refresh:
+        connection.execute("CALL refresh_continuous_aggregate('quaketrace.station_monthly', NULL, NULL)")
+    invalidate_overview()
+    return True
+
+
+def history_stats(connection, regions=ALL_REGIONS) -> dict:
+    picks, events, stations, first, last = connection.execute(HISTORY_TOTALS, (list(regions),)).fetchone()
     chunks = _first_row(connection, (CHUNK_COUNTS,))
     sizes = _first_row(connection, COMPRESSION_SIZES)
     # Postgres returns these sums as numeric (Decimal); keep the payload JSON-safe.
@@ -387,6 +423,7 @@ def history_stats(connection) -> dict:
 def history_buckets(
     dsn: str, *, limit: int, stations: list[str] | None = None,
     shifted_station: str | None = None, onset: datetime | None = None, offset_s: float = 0.0,
+    region: str = "northeast",
 ):
     """Monthly station residuals from Tiger Data.
 
@@ -395,17 +432,20 @@ def history_buckets(
     """
     from .history import Bucket  # noqa: PLC0415 - history imports nothing from here; keep it lazy
 
+    regions = list(REGIONS[region])
+
     def run(connection):
-        overview = _cached_overview(connection, dsn, limit)
+        overview = _cached_overview(connection, dsn, limit, regions)
         busiest = overview["busiest"]
         names = list(dict.fromkeys(list(stations or []) + [station for station, _ in busiest]))
         if offset_s and shifted_station and onset:
             rows = connection.execute(MONTHLY_WITH_SHIFT, {
                 "station": shifted_station, "onset": onset, "offset": offset_s, "stations": names,
+                "regions": regions,
             }).fetchall()
             source = "hypertable"
         else:
-            rows = connection.execute(MONTHLY_FROM_AGGREGATE, (names,)).fetchall()
+            rows = connection.execute(MONTHLY_FROM_AGGREGATE, (names, regions)).fetchall()
             source = "continuous aggregate"
         return busiest, names, rows, dict(overview["stats"]), source
 
@@ -434,6 +474,8 @@ LIVE_SCHEMA = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS ingest_runs_time ON quaketrace.ingest_runs (run_at DESC)",
+    "ALTER TABLE quaketrace.ingest_runs ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'northeast'",
+    "CREATE INDEX IF NOT EXISTS events_region_time ON quaketrace.events (region, event_time DESC)",
 )
 
 LIVE_STATUS = """
@@ -442,7 +484,9 @@ LIVE_STATUS = """
            (SELECT error FROM quaketrace.ingest_runs ORDER BY run_at DESC LIMIT 1),
            (SELECT count(*) FROM quaketrace.events WHERE ingested_at IS NOT NULL),
            (SELECT coalesce(sum(new_picks), 0) FROM quaketrace.ingest_runs),
-           (SELECT max(event_time) FROM quaketrace.events)
+           (SELECT max(event_time) FROM quaketrace.events),
+           (SELECT count(*) FROM quaketrace.events
+             WHERE ingested_at IS NOT NULL AND event_time > now() - INTERVAL '24 hours')
 """
 
 LATEST_LIVE_EVENT = """
@@ -462,12 +506,15 @@ def session(dsn: str, operation: str):
 
 
 def ensure_live_schema(connection) -> None:
-    for statement in LIVE_SCHEMA:
+    for statement in REGION_COLUMNS + LIVE_SCHEMA:
         connection.execute(statement)
+    ensure_station_monthly(connection)
 
 
-def latest_event_time(connection) -> datetime | None:
-    row = connection.execute("SELECT max(event_time) FROM quaketrace.events").fetchone()
+def latest_event_time(connection, region: str = "northeast") -> datetime | None:
+    row = connection.execute(
+        "SELECT max(event_time) FROM quaketrace.events WHERE region = %s", (region,)
+    ).fetchone()
     return row[0].astimezone(timezone.utc) if row and row[0] else None
 
 
@@ -480,41 +527,65 @@ def known_event_ids(connection, event_ids: list[str]) -> set[str]:
     return {row[0] for row in rows}
 
 
-def store_live(connection, added, *, window_start: datetime, window_end: datetime, checked: int,
-               error: str | None = None) -> tuple[int, int]:
-    """Insert newly published quakes and their picks, and log the run. Returns (events, picks) added."""
+PICK_COLUMNS = (
+    "event_time, event_id, station_id, location_code, channel_code, phase, "
+    "pick_time, residual_s, weight, distance_deg, azimuth_deg, region"
+)
+
+
+def store_events(connection, added) -> tuple[int, int]:
+    """Insert newly published quakes and their picks. Returns (events, picks) actually added."""
     new_events = new_picks = 0
     with connection.transaction():
         with connection.cursor() as cursor:
             for event, picks in added:
+                region = region_of(event.latitude, event.longitude)
                 cursor.execute(
                     """
                     INSERT INTO quaketrace.events
-                        (event_id, event_time, latitude, longitude, depth_km, magnitude, place, ingested_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+                        (event_id, event_time, latitude, longitude, depth_km, magnitude, place, region, ingested_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
                     ON CONFLICT (event_id) DO NOTHING
                     """,
-                    astuple(event),
+                    (*astuple(event), region),
                 )
                 if cursor.rowcount != 1:
                     continue
                 new_events += 1
                 cursor.executemany(
-                    """
-                    INSERT INTO quaketrace.picks VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    f"""
+                    INSERT INTO quaketrace.picks ({PICK_COLUMNS})
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT DO NOTHING
                     """,
-                    [astuple(pick) for pick in picks],
+                    [(*astuple(pick), region) for pick in picks],
                 )
                 new_picks += max(cursor.rowcount, 0)
-        connection.execute(
-            """
-            INSERT INTO quaketrace.ingest_runs (window_start, window_end, checked, new_events, new_picks, error)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (window_start, window_end, checked, new_events, new_picks, error),
-        )
     return new_events, new_picks
+
+
+def refresh_months(connection, first: datetime, last: datetime) -> None:
+    """Re-materialize station_monthly for the months between first and last (inclusive).
+
+    Real-time aggregation only covers rows newer than the last refresh, and the
+    refresh policy only looks back three months, so rows inserted into older
+    months (a backfill, or phase data USGS published late) need this.
+    """
+    start = datetime(first.year, first.month, 1, tzinfo=timezone.utc)
+    end = datetime(last.year + (last.month == 12), last.month % 12 + 1, 1, tzinfo=timezone.utc)
+    connection.execute("CALL refresh_continuous_aggregate('quaketrace.station_monthly', %s, %s)", (start, end))
+
+
+def log_run(connection, *, region: str, window_start: datetime, window_end: datetime, checked: int,
+            new_events: int, new_picks: int, error: str | None = None) -> None:
+    connection.execute(
+        """
+        INSERT INTO quaketrace.ingest_runs
+            (region, window_start, window_end, checked, new_events, new_picks, error)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (region, window_start, window_end, checked, new_events, new_picks, error),
+    )
 
 
 def _iso(moment) -> str | None:
@@ -526,11 +597,12 @@ def live_status(connection) -> dict | None:
     row = _first_row(connection, (LIVE_STATUS,))
     if not row or row[0] is None:
         return None
-    last_run, last_ok, error, events, picks, newest = row
+    last_run, last_ok, error, events, picks, newest, last_day = row
     latest = _first_row(connection, (LATEST_LIVE_EVENT,))
     return {
         "lastRun": _iso(last_run), "lastSuccess": _iso(last_ok), "error": error,
         "eventsAdded": int(events), "picksAdded": int(picks), "newestQuake": _iso(newest),
+        "lastDay": int(last_day),
         "latestAdded": {
             "id": latest[0], "time": _iso(latest[1]),
             "magnitude": float(latest[2]) if latest[2] is not None else None, "place": latest[3],
@@ -590,14 +662,14 @@ def _with_shared_connection(dsn: str, operation: str, work):
     raise TigerDataError(f"{operation} failed.")
 
 
-def _cached_overview(connection, dsn: str, limit: int) -> dict:
+def _cached_overview(connection, dsn: str, limit: int, regions: list[str]) -> dict:
     """Busiest stations and table totals change only when data loads; cache them briefly."""
-    key = (dsn, limit)
+    key = (dsn, limit, tuple(regions))
     cached = _overview_cache.get(key)
     if cached and time.monotonic() - cached["at"] < OVERVIEW_TTL_S:
         return cached
-    busiest = [(row[0], int(row[1])) for row in connection.execute(BUSIEST_STATIONS, (limit,)).fetchall()]
-    cached = {"at": time.monotonic(), "busiest": busiest, "stats": history_stats(connection)}
+    busiest = [(row[0], int(row[1])) for row in connection.execute(BUSIEST_STATIONS, (regions, limit)).fetchall()]
+    cached = {"at": time.monotonic(), "busiest": busiest, "stats": history_stats(connection, regions)}
     _overview_cache[key] = cached
     return cached
 
