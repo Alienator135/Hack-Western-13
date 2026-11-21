@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from os import getenv
 from pathlib import Path
 
 MAINSHOCK = "us7000ma74"
@@ -15,6 +17,8 @@ AUDIT_STATIONS = ("PE.PSUB", "LD.NPNY", "LD.BRNY", "LD.FOR", "N4.L59A", "LD.PAL"
 REPLAY_STATIONS = AUDIT_STATIONS + ("PE.PAPL", "N4.N58A", "N4.P61A")
 WAVEFORM_STATION = "LD.PAL"
 DEFAULT_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+TIGER_DSN_ENV = "QUAKETRACE_TIGER_DSN"
+logger = logging.getLogger(__name__)
 
 
 def utc(value: str) -> datetime:
@@ -59,9 +63,10 @@ class Fixture:
     arrivals: tuple[Arrival, ...]
     waveform: tuple[tuple[datetime, int], ...]
     outlines: dict
+    arrival_source: str = "bundled"
 
 
-def load_fixture(directory: Path = DEFAULT_FIXTURES) -> Fixture:
+def load_fixture(directory: Path = DEFAULT_FIXTURES, *, use_tiger: bool = True) -> Fixture:
     def read_json(name: str):
         return json.loads((directory / name).read_text(encoding="utf-8"))
 
@@ -88,4 +93,16 @@ def load_fixture(directory: Path = DEFAULT_FIXTURES) -> Fixture:
         waveform = tuple(
             (utc(row["time"]), int(row["counts"])) for row in csv.DictReader(file)
         )
-    return Fixture(events, stations, arrivals, waveform, read_json("outlines.geojson"))
+    fixture = Fixture(events, stations, arrivals, waveform, read_json("outlines.geojson"))
+    dsn = getenv(TIGER_DSN_ENV) if use_tiger and directory == DEFAULT_FIXTURES else None
+    if not dsn:
+        return fixture
+
+    from .tiger import TigerDataError, read_demo_arrivals
+
+    try:
+        database_arrivals = read_demo_arrivals(dsn, fixture)
+    except TigerDataError as error:
+        logger.warning("Using bundled arrival data: %s", error)
+        return fixture
+    return replace(fixture, arrivals=database_arrivals, arrival_source="tiger")
