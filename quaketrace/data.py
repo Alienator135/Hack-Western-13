@@ -1,0 +1,88 @@
+"""Shared data model and offline fixture loader."""
+
+from __future__ import annotations
+
+import csv
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+MAINSHOCK = "us7000ma74"
+BASELINE_EVENTS = (MAINSHOCK, "us7000maaw", "us7000mab9")
+EVALUATION_EVENTS = ("us7000mb70", "us6000mub7", "us6000mvg6", "us6000n0ne")
+AUDIT_STATIONS = ("PE.PSUB", "LD.NPNY", "LD.BRNY", "LD.FOR", "N4.L59A", "LD.PAL")
+REPLAY_STATIONS = AUDIT_STATIONS + ("PE.PAPL", "N4.N58A", "N4.P61A")
+WAVEFORM_STATION = "LD.PAL"
+DEFAULT_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def utc(value: str) -> datetime:
+    timestamp = datetime.fromisoformat(value)
+    if timestamp.tzinfo is None:
+        raise ValueError(f"Timestamp lacks a UTC offset: {value}")
+    return timestamp.astimezone(timezone.utc)
+
+
+@dataclass(frozen=True)
+class Event:
+    id: str
+    time: datetime
+    latitude: float
+    longitude: float
+    depth_km: float
+
+
+@dataclass(frozen=True)
+class StationLocation:
+    latitude: float
+    longitude: float
+
+
+@dataclass(frozen=True)
+class Arrival:
+    event_id: str
+    station_id: str
+    phase: str
+    pick_time: datetime
+    residual_s: float
+    weight: float
+    location_code: str
+    channel_code: str
+
+
+@dataclass(frozen=True)
+class Fixture:
+    events: dict[str, Event]
+    stations: dict[tuple[str, str], StationLocation]
+    arrivals: tuple[Arrival, ...]
+    waveform: tuple[tuple[datetime, int], ...]
+    outlines: dict
+
+
+def load_fixture(directory: Path = DEFAULT_FIXTURES) -> Fixture:
+    def read_json(name: str):
+        return json.loads((directory / name).read_text(encoding="utf-8"))
+
+    events = {
+        row["id"]: Event(
+            row["id"], utc(row["time"]), row["latitude"], row["longitude"], row["depth_km"]
+        )
+        for row in read_json("events.json")
+    }
+    stations = {
+        (row["event_id"], row["station_id"]): StationLocation(row["latitude"], row["longitude"])
+        for row in read_json("stations.json")
+    }
+    arrivals = tuple(
+        Arrival(
+            row["event_id"], row["station_id"], row["phase"], utc(row["pick_time"]),
+            row["residual_s"], row["weight"], row["location_code"], row["channel_code"],
+        )
+        for row in read_json("arrivals.json")
+    )
+    with (directory / "waveform.csv").open(encoding="utf-8", newline="") as file:
+        waveform = tuple(
+            (utc(row["time"]), int(row["counts"])) for row in csv.DictReader(file)
+        )
+    return Fixture(events, stations, arrivals, waveform, read_json("outlines.geojson"))

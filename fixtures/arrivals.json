@@ -1,0 +1,452 @@
+[
+  {
+    "event_id": "us7000ma74",
+    "station_id": "PE.PSUB",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:36.650000+00:00",
+    "residual_s": -0.47,
+    "weight": 2.3,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "LD.NPNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:41.270000+00:00",
+    "residual_s": 0.22,
+    "weight": 2.06,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "LD.BRNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:36.770000+00:00",
+    "residual_s": -0.06,
+    "weight": 1.6,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "LD.FOR",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:32.830000+00:00",
+    "residual_s": 0.19,
+    "weight": 1.91,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "N4.L59A",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:47.290000+00:00",
+    "residual_s": 0.09,
+    "weight": 1.77,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "LD.PAL",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:33.340000+00:00",
+    "residual_s": 0.11,
+    "weight": 1.86,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "PE.PAPL",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:32.830000+00:00",
+    "residual_s": -0.01,
+    "weight": 1.9,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "N4.N58A",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:46.770000+00:00",
+    "residual_s": -0.13,
+    "weight": 1.78,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000ma74",
+    "station_id": "N4.P61A",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:23:39.100000+00:00",
+    "residual_s": 0.39,
+    "weight": 2.19,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000maaw",
+    "station_id": "PE.PSUB",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:30:16.250000+00:00",
+    "residual_s": 0.37,
+    "weight": 2.2,
+    "location_code": "--",
+    "channel_code": "HHN"
+  },
+  {
+    "event_id": "us7000maaw",
+    "station_id": "LD.NPNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:30:20.880000+00:00",
+    "residual_s": 0.79,
+    "weight": 1.96,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000maaw",
+    "station_id": "LD.BRNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:30:15.990000+00:00",
+    "residual_s": 0.09,
+    "weight": 2.2,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000maaw",
+    "station_id": "LD.FOR",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:30:11.610000+00:00",
+    "residual_s": -0.26,
+    "weight": 2.49,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000maaw",
+    "station_id": "N4.L59A",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:30:26.620000+00:00",
+    "residual_s": 0.43,
+    "weight": 1.7,
+    "location_code": "00",
+    "channel_code": "HH2"
+  },
+  {
+    "event_id": "us7000maaw",
+    "station_id": "LD.PAL",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T14:30:12.260000+00:00",
+    "residual_s": -0.19,
+    "weight": 2.44,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000mab9",
+    "station_id": "PE.PSUB",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T21:59:30.390000+00:00",
+    "residual_s": -0.06,
+    "weight": 2.25,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000mab9",
+    "station_id": "LD.NPNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T21:59:34.030000+00:00",
+    "residual_s": -0.37,
+    "weight": 2.02,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000mab9",
+    "station_id": "LD.BRNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T21:59:30.180000+00:00",
+    "residual_s": 0.02,
+    "weight": 2.28,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000mab9",
+    "station_id": "LD.FOR",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T21:59:26.220000+00:00",
+    "residual_s": 0.33,
+    "weight": 1.93,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000mab9",
+    "station_id": "N4.L59A",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T21:59:40.770000+00:00",
+    "residual_s": 0.12,
+    "weight": 1.74,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000mab9",
+    "station_id": "LD.PAL",
+    "phase": "Pg",
+    "pick_time": "2024-04-05T21:59:26.650000+00:00",
+    "residual_s": 0.14,
+    "weight": 1.87,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000mb70",
+    "station_id": "PE.PSUB",
+    "phase": "Pg",
+    "pick_time": "2024-04-10T14:23:09.770000+00:00",
+    "residual_s": -0.06,
+    "weight": 2.1,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000mb70",
+    "station_id": "LD.NPNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-10T14:23:13.350000+00:00",
+    "residual_s": 0.13,
+    "weight": 1.92,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000mb70",
+    "station_id": "LD.BRNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-10T14:23:08.890000+00:00",
+    "residual_s": -0.03,
+    "weight": 2.15,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000mb70",
+    "station_id": "LD.FOR",
+    "phase": "Pg",
+    "pick_time": "2024-04-10T14:23:04.860000+00:00",
+    "residual_s": 0.12,
+    "weight": 2.44,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us7000mb70",
+    "station_id": "N4.L59A",
+    "phase": "Pg",
+    "pick_time": "2024-04-10T14:23:19.620000+00:00",
+    "residual_s": -0.02,
+    "weight": 1.65,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us7000mb70",
+    "station_id": "LD.PAL",
+    "phase": "Pg",
+    "pick_time": "2024-04-10T14:23:05.340000+00:00",
+    "residual_s": -0.0,
+    "weight": 2.39,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000mub7",
+    "station_id": "PE.PSUB",
+    "phase": "Pg",
+    "pick_time": "2024-04-27T13:49:54.450000+00:00",
+    "residual_s": -0.56,
+    "weight": 2.23,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000mub7",
+    "station_id": "LD.NPNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-27T13:49:58.750000+00:00",
+    "residual_s": -0.2,
+    "weight": 2.0,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000mub7",
+    "station_id": "LD.BRNY",
+    "phase": "Pg",
+    "pick_time": "2024-04-27T13:49:54.080000+00:00",
+    "residual_s": -0.64,
+    "weight": 2.25,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000mub7",
+    "station_id": "LD.FOR",
+    "phase": "Pg",
+    "pick_time": "2024-04-27T13:49:50.480000+00:00",
+    "residual_s": -0.05,
+    "weight": 1.92,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000mub7",
+    "station_id": "N4.L59A",
+    "phase": "Pg",
+    "pick_time": "2024-04-27T13:50:05.170000+00:00",
+    "residual_s": -0.01,
+    "weight": 1.72,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000mub7",
+    "station_id": "LD.PAL",
+    "phase": "Pg",
+    "pick_time": "2024-04-27T13:49:50.910000+00:00",
+    "residual_s": -0.24,
+    "weight": 1.87,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000mvg6",
+    "station_id": "PE.PSUB",
+    "phase": "Pg",
+    "pick_time": "2024-05-01T11:01:44.940000+00:00",
+    "residual_s": -0.47,
+    "weight": 2.16,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000mvg6",
+    "station_id": "LD.NPNY",
+    "phase": "Pg",
+    "pick_time": "2024-05-01T11:01:47.450000+00:00",
+    "residual_s": 0.15,
+    "weight": 2.05,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000mvg6",
+    "station_id": "LD.BRNY",
+    "phase": "Pg",
+    "pick_time": "2024-05-01T11:01:42.860000+00:00",
+    "residual_s": -0.08,
+    "weight": 2.33,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000mvg6",
+    "station_id": "LD.FOR",
+    "phase": "Pg",
+    "pick_time": "2024-05-01T11:01:38.830000+00:00",
+    "residual_s": 0.14,
+    "weight": 2.04,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000mvg6",
+    "station_id": "N4.L59A",
+    "phase": "Pg",
+    "pick_time": "2024-05-01T11:01:54.080000+00:00",
+    "residual_s": 0.06,
+    "weight": 1.74,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000mvg6",
+    "station_id": "LD.PAL",
+    "phase": "Pg",
+    "pick_time": "2024-05-01T11:01:39.300000+00:00",
+    "residual_s": 0.06,
+    "weight": 1.98,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000n0ne",
+    "station_id": "PE.PSUB",
+    "phase": "Pg",
+    "pick_time": "2024-05-24T07:50:29.340000+00:00",
+    "residual_s": -0.46,
+    "weight": 2.16,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000n0ne",
+    "station_id": "LD.NPNY",
+    "phase": "Pg",
+    "pick_time": "2024-05-24T07:50:33.360000+00:00",
+    "residual_s": 0.15,
+    "weight": 1.97,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000n0ne",
+    "station_id": "LD.BRNY",
+    "phase": "Pg",
+    "pick_time": "2024-05-24T07:50:28.980000+00:00",
+    "residual_s": -0.06,
+    "weight": 2.21,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000n0ne",
+    "station_id": "LD.FOR",
+    "phase": "Pg",
+    "pick_time": "2024-05-24T07:50:25.020000+00:00",
+    "residual_s": -0.16,
+    "weight": 2.48,
+    "location_code": "--",
+    "channel_code": "BHZ"
+  },
+  {
+    "event_id": "us6000n0ne",
+    "station_id": "N4.L59A",
+    "phase": "Pg",
+    "pick_time": "2024-05-24T07:50:39.570000+00:00",
+    "residual_s": 0.21,
+    "weight": 1.7,
+    "location_code": "00",
+    "channel_code": "HHZ"
+  },
+  {
+    "event_id": "us6000n0ne",
+    "station_id": "LD.PAL",
+    "phase": "Pg",
+    "pick_time": "2024-05-24T07:50:25.570000+00:00",
+    "residual_s": -0.13,
+    "weight": 2.44,
+    "location_code": "--",
+    "channel_code": "HHZ"
+  }
+]

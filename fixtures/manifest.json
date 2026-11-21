@@ -1,0 +1,136 @@
+{
+  "files": {
+    "arrivals.json": "828aa8f9fb7b21a19b5ac181b20d73a46e855b4d5b2710c2272c547cf07b10d2",
+    "events.json": "4a8cb861aaab075c844f84e24730df18b2b664a3ce5011661f732e6dfac9050c",
+    "outlines.geojson": "56da3865f4a3af55db2d092eec72c08c0996ef5b8d58ba53e67e7c6e7ab9f488",
+    "stations.json": "6c0429dc2c8e32da78a504600db253c99758f53ccb6f5c662bc92db207505758",
+    "waveform.csv": "6636b227314a3ddac6d022042138426efffef3f65796568d3419adfce2af956b"
+  },
+  "phase_data_by_event": {
+    "us6000mub7": "https://earthquake.usgs.gov/product/phase-data/us6000mub7/us/1719958385040/quakeml.xml",
+    "us6000mvg6": "https://earthquake.usgs.gov/product/phase-data/us6000mvg6/us/1721015917040/quakeml.xml",
+    "us6000n0ne": "https://earthquake.usgs.gov/product/phase-data/us6000n0ne/us/1722910224040/quakeml.xml",
+    "us7000ma74": "https://earthquake.usgs.gov/product/phase-data/us7000ma74/us/1718229114040/quakeml.xml",
+    "us7000maaw": "https://earthquake.usgs.gov/product/phase-data/us7000maaw/us/1718229114040/quakeml.xml",
+    "us7000mab9": "https://earthquake.usgs.gov/product/phase-data/us7000mab9/us/1718229114040/quakeml.xml",
+    "us7000mb70": "https://earthquake.usgs.gov/product/phase-data/us7000mb70/us/1718590504040/quakeml.xml"
+  },
+  "schema_version": 1,
+  "sources": {
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000mub7.geojson": {
+      "resolved_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us6000mub7&format=geojson",
+      "retrieved_utc": "2026-11-21T04:15:11.654134+00:00",
+      "sha256": "96d175d92fd1005cd49546e6ce2797bfb6bc790ce32acbc8b549258e00d395c1"
+    },
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000mvg6.geojson": {
+      "resolved_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us6000mvg6&format=geojson",
+      "retrieved_utc": "2026-11-21T04:15:12.532140+00:00",
+      "sha256": "7e18bd843f54a03564813cd6cbbf528f550577a31fe56a58c00cd4f9b2e3f1b5"
+    },
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000n0ne.geojson": {
+      "resolved_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us6000n0ne&format=geojson",
+      "retrieved_utc": "2026-11-21T04:15:13.218103+00:00",
+      "sha256": "1c49f6d2b58abbb9899f42e880d7e8f94888eb1cf6a72600f9eef77ade4c3f47"
+    },
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000ma74.geojson": {
+      "resolved_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000ma74&format=geojson",
+      "retrieved_utc": "2026-11-21T04:15:07.938123+00:00",
+      "sha256": "71619d319b919994d05bd0b282a04f21d0776dd02abea12391dbbb0386ea9eba"
+    },
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000maaw.geojson": {
+      "resolved_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000maaw&format=geojson",
+      "retrieved_utc": "2026-11-21T04:15:08.935900+00:00",
+      "sha256": "aac9865d556f39c564c33690cefb38a6c025c753a62a8051b99b3f427d0a5bce"
+    },
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000mab9.geojson": {
+      "resolved_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000mab9&format=geojson",
+      "retrieved_utc": "2026-11-21T04:15:09.922840+00:00",
+      "sha256": "941974738bae479917299976708cee989577043108864bb92ad9fcbe05e3e2c6"
+    },
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000mb70.geojson": {
+      "resolved_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000mb70&format=geojson",
+      "retrieved_utc": "2026-11-21T04:15:10.787039+00:00",
+      "sha256": "79f342e58585db08712f5a711b48005c816f0ffdfbcb46ab99830a204f12cb03"
+    },
+    "https://earthquake.usgs.gov/product/phase-data/us6000mub7/us/1719958385040/quakeml.xml": {
+      "resolved_url": "https://earthquake.usgs.gov/product/phase-data/us6000mub7/us/1719958385040/quakeml.xml",
+      "retrieved_utc": "2026-11-21T04:15:11.820854+00:00",
+      "sha256": "69703dbdce2ed55b9d51e99bf21bb2930c6b69c3caba1d842548e518dafd44b0"
+    },
+    "https://earthquake.usgs.gov/product/phase-data/us6000mvg6/us/1721015917040/quakeml.xml": {
+      "resolved_url": "https://earthquake.usgs.gov/product/phase-data/us6000mvg6/us/1721015917040/quakeml.xml",
+      "retrieved_utc": "2026-11-21T04:15:12.739966+00:00",
+      "sha256": "1033e6aa4b90edbb2e418991793e69686e26dde1c623b021d9ec20d6be0af2f1"
+    },
+    "https://earthquake.usgs.gov/product/phase-data/us6000n0ne/us/1722910224040/quakeml.xml": {
+      "resolved_url": "https://earthquake.usgs.gov/product/phase-data/us6000n0ne/us/1722910224040/quakeml.xml",
+      "retrieved_utc": "2026-11-21T04:15:13.403865+00:00",
+      "sha256": "bfa6591f445b7f5a015c3f8436d600ea4e57f9cb90ed42fa6e8331c6fadb9734"
+    },
+    "https://earthquake.usgs.gov/product/phase-data/us7000ma74/us/1718229114040/quakeml.xml": {
+      "resolved_url": "https://earthquake.usgs.gov/product/phase-data/us7000ma74/us/1718229114040/quakeml.xml",
+      "retrieved_utc": "2026-11-21T04:15:08.181751+00:00",
+      "sha256": "db37388a7954ca86f510368d356c3cd930d8096587e0eb81e3230c1594961816"
+    },
+    "https://earthquake.usgs.gov/product/phase-data/us7000maaw/us/1718229114040/quakeml.xml": {
+      "resolved_url": "https://earthquake.usgs.gov/product/phase-data/us7000maaw/us/1718229114040/quakeml.xml",
+      "retrieved_utc": "2026-11-21T04:15:09.098101+00:00",
+      "sha256": "83221d1f47633b2b85c637bda48dd130feda9d49f2c6ff115f4b194dedd02c62"
+    },
+    "https://earthquake.usgs.gov/product/phase-data/us7000mab9/us/1718229114040/quakeml.xml": {
+      "resolved_url": "https://earthquake.usgs.gov/product/phase-data/us7000mab9/us/1718229114040/quakeml.xml",
+      "retrieved_utc": "2026-11-21T04:15:10.135398+00:00",
+      "sha256": "eb88a2b86a755618ba6cb7459f3081cd6e57918ae29ac5a3f9abd2c333eb4f4a"
+    },
+    "https://earthquake.usgs.gov/product/phase-data/us7000mb70/us/1718590504040/quakeml.xml": {
+      "resolved_url": "https://earthquake.usgs.gov/product/phase-data/us7000mb70/us/1718590504040/quakeml.xml",
+      "retrieved_utc": "2026-11-21T04:15:10.957610+00:00",
+      "sha256": "383d8a46561b134044be3c0ba6d0e270daa78a917592259a18a3c8f041faf1ca"
+    },
+    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.1/geojson/ne_110m_admin_1_states_provinces.geojson": {
+      "resolved_url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.1/geojson/ne_110m_admin_1_states_provinces.geojson",
+      "retrieved_utc": "2026-11-21T04:15:14.235053+00:00",
+      "sha256": "0067dec6a2c4f9c7a644bf7a9a46163d8d881595953326d0c67d89934190aefe"
+    },
+    "https://service.earthscope.org/fdsnws/dataselect/1/query?net=LD&sta=PAL&loc=--&cha=HHZ&starttime=2024-04-05T14%3A23%3A25&endtime=2024-04-05T14%3A23%3A50&format=geocsv": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/dataselect/1/query?net=LD&sta=PAL&loc=--&cha=HHZ&starttime=2024-04-05T14%3A23%3A25&endtime=2024-04-05T14%3A23%3A50&format=geocsv",
+      "retrieved_utc": "2026-11-21T04:15:14.049741+00:00",
+      "sha256": "04be4b669b8b75e406654d98bcbb8491abb1ea77d70bf11818d38f2d50dfe048"
+    },
+    "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CN58A%2CNPNY%2CP61A%2CPAL%2CPAPL%2CPSUB&starttime=2024-04-05T14%3A23%3A20.045000%2B00%3A00&endtime=2024-04-05T14%3A23%3A21.045000%2B00%3A00&level=station&format=text": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CN58A%2CNPNY%2CP61A%2CPAL%2CPAPL%2CPSUB&starttime=2024-04-05T14%3A23%3A20.045000%2B00%3A00&endtime=2024-04-05T14%3A23%3A21.045000%2B00%3A00&level=station&format=text",
+      "retrieved_utc": "2026-11-21T04:15:08.418347+00:00",
+      "sha256": "471877fc07e05bad6a753f1e1484111e5ccdc6e7a22508fa44bc54d446494d19"
+    },
+    "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-05T14%3A29%3A59.144000%2B00%3A00&endtime=2024-04-05T14%3A30%3A00.144000%2B00%3A00&level=station&format=text": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-05T14%3A29%3A59.144000%2B00%3A00&endtime=2024-04-05T14%3A30%3A00.144000%2B00%3A00&level=station&format=text",
+      "retrieved_utc": "2026-11-21T04:15:09.215267+00:00",
+      "sha256": "68320acca55e073cd4dd461155c2db98ef5c24e55c5d4b9916be33d9d5950b24"
+    },
+    "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-05T21%3A59%3A13.447000%2B00%3A00&endtime=2024-04-05T21%3A59%3A14.447000%2B00%3A00&level=station&format=text": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-05T21%3A59%3A13.447000%2B00%3A00&endtime=2024-04-05T21%3A59%3A14.447000%2B00%3A00&level=station&format=text",
+      "retrieved_utc": "2026-11-21T04:15:10.246767+00:00",
+      "sha256": "68320acca55e073cd4dd461155c2db98ef5c24e55c5d4b9916be33d9d5950b24"
+    },
+    "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-10T14%3A22%3A52.782000%2B00%3A00&endtime=2024-04-10T14%3A22%3A53.782000%2B00%3A00&level=station&format=text": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-10T14%3A22%3A52.782000%2B00%3A00&endtime=2024-04-10T14%3A22%3A53.782000%2B00%3A00&level=station&format=text",
+      "retrieved_utc": "2026-11-21T04:15:11.073412+00:00",
+      "sha256": "68320acca55e073cd4dd461155c2db98ef5c24e55c5d4b9916be33d9d5950b24"
+    },
+    "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-27T13%3A49%3A38.053000%2B00%3A00&endtime=2024-04-27T13%3A49%3A39.053000%2B00%3A00&level=station&format=text": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-04-27T13%3A49%3A38.053000%2B00%3A00&endtime=2024-04-27T13%3A49%3A39.053000%2B00%3A00&level=station&format=text",
+      "retrieved_utc": "2026-11-21T04:15:11.943590+00:00",
+      "sha256": "68320acca55e073cd4dd461155c2db98ef5c24e55c5d4b9916be33d9d5950b24"
+    },
+    "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-05-01T11%3A01%3A27.363000%2B00%3A00&endtime=2024-05-01T11%3A01%3A28.363000%2B00%3A00&level=station&format=text": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-05-01T11%3A01%3A27.363000%2B00%3A00&endtime=2024-05-01T11%3A01%3A28.363000%2B00%3A00&level=station&format=text",
+      "retrieved_utc": "2026-11-21T04:15:12.856156+00:00",
+      "sha256": "68320acca55e073cd4dd461155c2db98ef5c24e55c5d4b9916be33d9d5950b24"
+    },
+    "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-05-24T07%3A50%3A12.710000%2B00%3A00&endtime=2024-05-24T07%3A50%3A13.710000%2B00%3A00&level=station&format=text": {
+      "resolved_url": "https://service.earthscope.org/fdsnws/station/1/query?net=LD%2CN4%2CPE&sta=BRNY%2CFOR%2CL59A%2CNPNY%2CPAL%2CPSUB&starttime=2024-05-24T07%3A50%3A12.710000%2B00%3A00&endtime=2024-05-24T07%3A50%3A13.710000%2B00%3A00&level=station&format=text",
+      "retrieved_utc": "2026-11-21T04:15:13.519014+00:00",
+      "sha256": "68320acca55e073cd4dd461155c2db98ef5c24e55c5d4b9916be33d9d5950b24"
+    }
+  }
+}
