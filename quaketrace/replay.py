@@ -123,6 +123,38 @@ def fit_location(readings: tuple[Reading, ...]) -> Fit:
     )
 
 
+def travel_time_s(location: StationLocation, station: StationLocation) -> float:
+    """Model Pg travel time from an epicentre to a station."""
+    x, y = project(location.latitude, location.longitude)
+    sx, sy = project(station.latitude, station.longitude)
+    return float(np.sqrt((x - sx) ** 2 + (y - sy) ** 2 + DEPTH_KM ** 2) / SPEED_KM_S)
+
+
+def leave_one_out(readings: tuple[Reading, ...]) -> list[Candidate]:
+    """Refit without each reading, best remaining fit first."""
+    candidates = []
+    for index, reading in enumerate(readings):
+        fit = fit_location(readings[:index] + readings[index + 1:])
+        predicted = fit.origin_s + travel_time_s(fit.location, reading.location)
+        candidates.append(Candidate(reading.station_id, fit, float(reading.time_s - predicted)))
+    candidates.sort(key=lambda candidate: candidate.fit.rms_s)
+    return candidates
+
+
+def misfit_surface(readings: tuple[Reading, ...], east: np.ndarray, north: np.ndarray) -> np.ndarray:
+    """RMS timing misfit (s) at every grid point, shaped (len(north), len(east))."""
+    positions = np.array([
+        project(reading.location.latitude, reading.location.longitude) for reading in readings
+    ])
+    times = np.array([reading.time_s for reading in readings])
+    points = _points(east, north)
+    differences = points[:, None, :] - positions[None, :, :]
+    travel_times = np.sqrt(np.sum(differences ** 2, axis=2) + DEPTH_KM ** 2) / SPEED_KM_S
+    implied = (times - times.min()) - travel_times
+    errors = implied - implied.mean(axis=1)[:, None]
+    return np.sqrt(np.mean(errors ** 2, axis=1)).reshape(len(north), len(east))
+
+
 def diagnose(readings: tuple[Reading, ...]) -> ReplayResult:
     if len(readings) < 5:
         return ReplayResult("insufficient")
@@ -130,16 +162,7 @@ def diagnose(readings: tuple[Reading, ...]) -> ReplayResult:
     if full.at_boundary:
         return ReplayResult("inconclusive", full)
 
-    candidates = []
-    for index, reading in enumerate(readings):
-        fit = fit_location(readings[:index] + readings[index + 1:])
-        x, y = project(fit.location.latitude, fit.location.longitude)
-        sx, sy = project(reading.location.latitude, reading.location.longitude)
-        predicted = fit.origin_s + np.sqrt((x - sx) ** 2 + (y - sy) ** 2 + DEPTH_KM ** 2) / SPEED_KM_S
-        offset = float(reading.time_s - predicted)
-        candidates.append(Candidate(reading.station_id, fit, offset))
-
-    candidates.sort(key=lambda candidate: candidate.fit.rms_s)
+    candidates = leave_one_out(readings)
     best = candidates[0]
     if best.fit.at_boundary or abs(best.offset_s) < 1.5 or best.fit.rms_s > 0.65 * full.rms_s:
         return ReplayResult("inconclusive", full)

@@ -9,7 +9,7 @@ Use Python 3.12. On Windows from PowerShell:
 ```powershell
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt
-.venv/Scripts/python.exe -m streamlit run app.py
+.venv/Scripts/python.exe server.py
 ```
 
 On macOS or Linux:
@@ -17,22 +17,63 @@ On macOS or Linux:
 ```sh
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m streamlit run app.py
+.venv/bin/python server.py
 ```
 
-Installing dependencies requires internet access. After installation, Replay and Station Audit work offline using the committed fixture, including the waveform and state outlines. World Explorer and the optional street map use live services without an account or API key.
+Open http://127.0.0.1:8000. `server.py` serves the web UI in `web/` and a JSON API backed by the `quaketrace` package, using only the Python standard library on top of the existing requirements. Use `--port` to change the port.
+
+Installing dependencies requires internet access. After installation, Replay and Station Audit work offline using the committed fixture, including the waveform and state outlines. The earlier Streamlit app, which also has the World Explorer, still runs with `.venv/Scripts/python.exe -m streamlit run app.py`.
+
+## Google Maps and Earth
+
+Without a key the maps draw the bundled state outlines. With a Google Maps browser key, every map gets **Map**, **Satellite**, and **Earth 3D** buttons. Earth 3D uses Google's photorealistic 3D tiles and shows each station's ray to the estimated epicentre. Every map also has an **Open in Google Earth** link that needs no key.
+
+1. In Google Cloud Console, enable **Maps JavaScript API** for Map and Satellite. Enable **Map Tiles API** for Earth 3D. [Get an API key](https://developers.google.com/maps/documentation/javascript/get-api-key) · [3D Maps](https://developers.google.com/maps/documentation/javascript/3d/overview)
+2. Restrict the key to HTTP referrers such as `http://127.0.0.1:8000/*` and `http://localhost:8000/*`.
+3. Either start the server with the key:
+
+   ```powershell
+   $env:GOOGLE_MAPS_API_KEY = Read-Host -MaskInput "Google Maps browser key"
+   .venv/Scripts/python.exe server.py
+   ```
+
+   or select **About** in the app and paste the key. That copy stays in the browser's local storage. **Use offline map** there turns Google off again.
+
+Markers use Google's `DEMO_MAP_ID`. Set `GOOGLE_MAPS_MAP_ID` to use your own cloud-styled map. If Google rejects the key or a library fails to load, the map falls back to the offline outlines and says why.
+
+## Tiger Data
+
+Tiger Data can supply the real arrival picks used by Replay and Station Audit. The seed command writes the 45 fixture arrivals to a TimescaleDB hypertable partitioned by earthquake time. The app queries the matching fixture revision by station and time. The source measurements stay intact when a judge applies a simulated delay. The bundled map and waveform remain available offline.
+
+1. In Tiger Console, create a development service with **TimescaleDB** enabled and copy its PostgreSQL connection string. [Create a Tiger Cloud service](https://www.tigerdata.com/docs/get-started/quickstart/create-service) · [Find the connection details](https://www.tigerdata.com/docs/integrate/find-connection-details)
+2. From the repository root in PowerShell 7, install the updated dependencies and enter the connection string in a masked prompt:
+
+   ```powershell
+   .venv/Scripts/python.exe -m pip install -r requirements.txt
+   $env:QUAKETRACE_TIGER_DSN = Read-Host -MaskInput "Tiger Data PostgreSQL connection string"
+   .venv/Scripts/python.exe scripts/tiger_data.py seed
+   .venv/Scripts/python.exe scripts/tiger_data.py verify
+   .venv/Scripts/python.exe scripts/tiger_data.py history --station LD.PAL
+   .venv/Scripts/python.exe server.py
+   ```
+
+3. Run `verify` for the demo check. It compares every cloud arrival with its bundled counterpart and runs the Palisades audit against the queried rows. `history` shows which weeks have station data and uses TimescaleDB's `time_bucket` to summarize event-centred timing residuals. [TimescaleDB time buckets](https://www.tigerdata.com/docs/reference/timescaledb/hyperfunctions/time-series-utilities/time_bucket)
+
+The script reads the connection string from the current shell. Start the server in that same shell so it inherits the setting. The seed command can be rerun and inserts each revision only once. If the database is unavailable or the requested revision is missing rows, the app logs the reason and loads the bundled arrivals. The header shows **Ready · Tiger Data** when the cloud arrivals are in use, and **Station audit → Under the hood** names the active source.
 
 ## Explore elsewhere
 
-Open **World explorer**, pick **Worldwide**, a country, a listed city, or your own latitude and longitude, then choose dates and a minimum magnitude. **Search earthquakes** retrieves up to 100 matches from USGS. Country searches cover the surrounding region, including offshore and neighbouring events. Choose an earthquake to see its location and the stations in its published arrival records, then choose a station to zoom to it. **Show worldwide station footprint** shows stations that detected the event from far away.
+In the Streamlit app, open **World explorer**, pick **Worldwide**, a country, a listed city, or your own latitude and longitude, then choose dates and a minimum magnitude. **Search earthquakes** retrieves up to 100 matches from USGS. Country searches cover the surrounding region, including offshore and neighbouring events. Choose an earthquake to see its location and the stations in its published arrival records, then choose a station to zoom to it. **Show worldwide station footprint** shows stations that detected the event from far away.
 
 Station names and registry coordinates come from EarthScope where available. Estimated positions use the distance and bearing published with the USGS arrival and are labelled separately. Some catalog events have no publicly available arrival data. Use **Street map** in Replay to see geographic context for the seven bundled clock-shift scenarios. [USGS earthquake catalog](https://earthquake.usgs.gov/fdsnws/event/1/) · [OpenStreetMap attribution](https://www.openstreetmap.org/copyright)
 
 ## Three-minute demo
 
-1. **Replay.** Choose an earthquake, then select a station that recorded it. Set the arrival shift and select **Run replay**. **Mainshock example** applies `LD.PAL +5 s` to the April 5 mainshock. Inspect the suspected station and compare the two estimates. Select **Reveal scenario** to see the injected offset and the USGS comparison. The mainshock includes the LD.PAL waveform and pick markers.
-2. **Audit.** Switch to **Station audit** and select **Example**. This applies `LD.PAL +3 s` starting April 27. Inspect the first suspicious event, the May 1 confirmation, and the May 24 supporting reading. The evidence table exposes the individual event deviations.
-3. **Reset** either view to return to the recorded inputs.
+1. **Real quake and tamper.** The map shows the nine stations that recorded the April 5 mainshock and QuakeTrace's own estimate. As the judge, choose a station and a clock shift, then select **Lock it in**. **Let the app pick secretly** chooses both without showing them.
+2. **Damage.** See how far the estimated epicentre moved and how the teal best-fit zone stretched. **Details** shows each station's residual and the fit statistics.
+3. **Investigate.** QuakeTrace refits without each station in turn. The arrival-time chart shows the suspect's reading against the expected 6 km/s line, and **Step through the runs** shows each refit on the map.
+4. **Reveal.** Compare the injected and found shifts and the error against the USGS epicentre with and without the suspect. Export the result as PNG or CSV.
+5. **Station audit.** **Check PAL across 7 quakes** carries the shift into the audit from April 27. The heatmap and finding show when the clock broke and which GPS log window to review. **Judge controls** runs any other scenario, and **Mark as suspect** or **Dismiss** records a decision in this browser.
 
 | Scenario | Result on the committed fixture |
 |---|---|
@@ -45,11 +86,14 @@ Station names and registry coordinates come from EarthScope where available. Est
 
 | Path | Purpose |
 |---|---|
-| `app.py` | Streamlit controls and presentation |
+| `server.py` | Standard-library web server for the UI and its JSON API |
+| `web/` | The QuakeTrace UI: guided replay, station audit, and the Google Maps, Earth 3D, and offline map views |
+| `quaketrace/api.py` | JSON payloads for the UI: fits, best-fit zones, leave-one-out runs, audit grid |
+| `app.py` | Earlier Streamlit app, including World Explorer |
 | `quaketrace/` | Fixture loading, location fit, station audit, maps, and live catalog exploration |
 | `scripts/fetch_fixtures.py` | Public source download, parsing, validation, and fixture generation |
 | `fixtures/` | Seven event origins, 45 arrival and station-epoch records, waveform, local outlines, and provenance manifest |
-| `tests/` | Fixture integrity, parser, solver, audit, and Streamlit interaction coverage |
+| `tests/` | Fixture integrity, parser, solver, audit, API and server, and Streamlit interaction coverage |
 
 Run these from the repository root with the project environment active:
 
