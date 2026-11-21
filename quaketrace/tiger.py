@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 from contextlib import contextmanager
 from dataclasses import astuple
 from datetime import datetime, timezone
@@ -390,9 +392,9 @@ def history_buckets(
     """
     from .history import Bucket  # noqa: PLC0415 - history imports nothing from here; keep it lazy
 
-    with _autocommit(dsn, "Tiger Data history query") as connection:
-        connection.execute("SET statement_timeout = '8s'")
-        busiest = [(row[0], int(row[1])) for row in connection.execute(BUSIEST_STATIONS, (limit,)).fetchall()]
+    def run(connection):
+        overview = _cached_overview(connection, dsn, limit)
+        busiest = overview["busiest"]
         names = list(dict.fromkeys(list(stations or []) + [station for station, _ in busiest]))
         if offset_s and shifted_station and onset:
             rows = connection.execute(MONTHLY_WITH_SHIFT, {
@@ -402,9 +404,77 @@ def history_buckets(
         else:
             rows = connection.execute(MONTHLY_FROM_AGGREGATE, (names,)).fetchall()
             source = "continuous aggregate"
-        stats = history_stats(connection)
+        return busiest, names, rows, dict(overview["stats"]), source
+
+    busiest, names, rows, stats, source = _with_shared_connection(dsn, "Tiger Data history query", run)
     buckets = [
         Bucket(month.astimezone(timezone.utc), station, int(picks), float(mean))
         for month, station, picks, mean in rows
     ]
     return busiest, names, buckets, stats, source
+
+
+# ---------------------------------------------------------------- shared connection
+
+# Opening a TLS connection to Tiger Cloud costs a few hundred milliseconds, far
+# more than the queries. The web server keeps one autocommit connection open and
+# requests take turns on it; a dropped connection is reopened once and retried.
+_shared_lock = threading.Lock()
+_shared: dict = {"connection": None, "dsn": None}
+OVERVIEW_TTL_S = 60.0
+_overview_cache: dict = {}
+
+
+def _open_shared(dsn: str):
+    connection = psycopg.connect(dsn, connect_timeout=3, autocommit=True)
+    connection.execute("SET statement_timeout = '8s'")
+    _shared.update(connection=connection, dsn=dsn)
+    return connection
+
+
+def _drop_shared():
+    connection = _shared.get("connection")
+    _shared.update(connection=None, dsn=None)
+    if connection is not None:
+        try:
+            connection.close()
+        except psycopg.Error:
+            pass
+
+
+def _with_shared_connection(dsn: str, operation: str, work):
+    with _shared_lock:
+        for attempt in range(2):
+            try:
+                connection = _shared["connection"]
+                if connection is None or connection.closed or _shared["dsn"] != dsn:
+                    _drop_shared()
+                    connection = _open_shared(dsn)
+                return work(connection)
+            except psycopg.OperationalError:
+                # Stale or dropped connection: reopen once, then give up.
+                _drop_shared()
+                if attempt:
+                    raise TigerDataError(f"{operation} failed (OperationalError).") from None
+            except psycopg.Error as error:
+                raise TigerDataError(f"{operation} failed ({type(error).__name__}).") from None
+    raise TigerDataError(f"{operation} failed.")
+
+
+def _cached_overview(connection, dsn: str, limit: int) -> dict:
+    """Busiest stations and table totals change only when data loads; cache them briefly."""
+    key = (dsn, limit)
+    cached = _overview_cache.get(key)
+    if cached and time.monotonic() - cached["at"] < OVERVIEW_TTL_S:
+        return cached
+    busiest = [(row[0], int(row[1])) for row in connection.execute(BUSIEST_STATIONS, (limit,)).fetchall()]
+    cached = {"at": time.monotonic(), "busiest": busiest, "stats": history_stats(connection)}
+    _overview_cache[key] = cached
+    return cached
+
+
+def reset_shared_connection():
+    """Close the shared connection and clear cached totals (after a reseed, and in tests)."""
+    with _shared_lock:
+        _drop_shared()
+        _overview_cache.clear()

@@ -16,15 +16,17 @@ import json
 import logging
 import mimetypes
 import re
+import threading
 from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from os import getenv
 from pathlib import Path
+from time import perf_counter
 from urllib.parse import parse_qs, urlparse
 
 from quaketrace import api
-from quaketrace.data import MAINSHOCK, load_fixture
+from quaketrace.data import MAINSHOCK, TIGER_DSN_ENV, load_fixture
 from quaketrace.env import load_env
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
@@ -168,6 +170,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send(HTTPStatus.OK, target.read_bytes(), content_type)
 
 
+def _warm_tiger():
+    started = perf_counter()
+    try:
+        view = api.history_view()
+    except Exception:  # noqa: BLE001 - warm-up is best effort
+        logger.exception("Tiger Data warm-up failed")
+        return
+    logger.info("History source: %s (warm-up %.0f ms)", view.get("source"), (perf_counter() - started) * 1000)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host", default="127.0.0.1")
@@ -180,7 +192,10 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     source = fixture().arrival_source
     maps = "Google Maps enabled" if getenv(GOOGLE_KEY_ENV) else f"no {GOOGLE_KEY_ENV}, using offline map"
-    print(f"QuakeTrace on http://{args.host}:{args.port} · arrivals: {source} · {maps}")
+    print(f"QuakeTrace on http://{args.host}:{args.port} · arrivals: {source} · {maps}", flush=True)
+    if getenv(TIGER_DSN_ENV):
+        # Open the shared Tiger connection now so the first click in front of judges is fast.
+        threading.Thread(target=_warm_tiger, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
