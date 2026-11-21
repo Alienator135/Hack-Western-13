@@ -22,7 +22,17 @@ python3.12 -m venv .venv
 
 Open http://127.0.0.1:8000. `server.py` serves the web UI in `web/` and a JSON API backed by the `quaketrace` package, using only the Python standard library on top of the existing requirements. Use `--port` to change the port.
 
-Installing dependencies requires internet access. After installation, Replay and Station Audit work offline using the committed fixture, including the waveform and state outlines. The earlier Streamlit app, which also has the World Explorer, still runs with `.venv/Scripts/python.exe -m streamlit run app.py`.
+To run against Tiger Data, put your connection settings in a `.env` file in the repository root (see `.env.example`, or save Tiger Cloud's downloaded credentials file as `.env`). It is gitignored and loaded at startup, so the same commands work on Windows and macOS. On macOS, for example:
+
+```sh
+cp ~/Downloads/tiger-cloud-quaketrace-credentials.env .env
+.venv/bin/python scripts/tiger_data.py health --station LD.PAL --onset 2024-04-27 --offset 3
+.venv/bin/python server.py
+```
+
+The Tiger service already holds the data once seeded, so a new machine only needs `.env`; run `seed` and `seed-history` again only for a new service.
+
+Installing dependencies requires internet access. After installation, Replay and Station Audit work offline using the committed fixture, including the waveform and state outlines. The earlier Streamlit app, which also has the World Explorer, still runs with `.venv/Scripts/python.exe -m streamlit run app.py` (`.venv/bin/python` on macOS).
 
 ## Google Maps and Earth
 

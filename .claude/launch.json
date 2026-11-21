@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["server.py", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "quaketrace-mac",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["server.py", "--port", "8765"],
+      "port": 8765
     }
   ]
 }

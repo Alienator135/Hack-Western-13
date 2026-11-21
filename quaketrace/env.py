@@ -33,7 +33,8 @@ def load_env(path: Path = PROJECT_ENV) -> list[str]:
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]
-            if key not in os.environ:
+            # Blank template lines (.env.example) must not set empty variables.
+            if value and key not in os.environ:
                 os.environ[key] = value
                 loaded.append(key)
     if not os.environ.get(TIGER_DSN_ENV) and os.environ.get("TIMESCALE_SERVICE_URL"):
