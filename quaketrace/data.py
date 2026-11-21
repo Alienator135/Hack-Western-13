@@ -37,6 +37,7 @@ class Event:
 class StationLocation:
     latitude: float
     longitude: float
+    name: str = ""
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,9 @@ def load_fixture(directory: Path = DEFAULT_FIXTURES) -> Fixture:
         for row in read_json("events.json")
     }
     stations = {
-        (row["event_id"], row["station_id"]): StationLocation(row["latitude"], row["longitude"])
+        (row["event_id"], row["station_id"]): StationLocation(
+            row["latitude"], row["longitude"], row.get("name", "")
+        )
         for row in read_json("stations.json")
     }
     arrivals = tuple(

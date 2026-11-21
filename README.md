@@ -1,6 +1,6 @@
 # QuakeTrace
 
-QuakeTrace replays the April 5, 2024 Tewksbury, New Jersey earthquake and shows how a simulated station clock error can move its estimated epicentre. Its station audit uses seven USGS events to estimate when a persistent timing discrepancy first appeared and which later events support it.
+QuakeTrace replays seven recorded earthquakes from the Tewksbury, New Jersey sequence and shows how a simulated station clock error can move an estimated epicentre. Its station audit uses the same USGS events to estimate when a persistent timing discrepancy first appeared and which later events support it.
 
 ## Run locally
 
@@ -20,11 +20,17 @@ python3.12 -m venv .venv
 .venv/bin/python -m streamlit run app.py
 ```
 
-Installing dependencies requires internet access. After installation, both views use the committed fixture, including the waveform and state outlines. The app needs no account, credentials, cloud database, or map tile service.
+Installing dependencies requires internet access. After installation, Replay and Station Audit work offline using the committed fixture, including the waveform and state outlines. World Explorer and the optional street map use live services without an account or API key.
+
+## Explore elsewhere
+
+Open **World explorer**, pick **Worldwide**, a country, a listed city, or your own latitude and longitude, then choose dates and a minimum magnitude. **Search earthquakes** retrieves up to 100 matches from USGS. Country searches cover the surrounding region, including offshore and neighbouring events. Choose an earthquake to see its location and the stations in its published arrival records, then choose a station to zoom to it. **Show worldwide station footprint** shows stations that detected the event from far away.
+
+Station names and registry coordinates come from EarthScope where available. Estimated positions use the distance and bearing published with the USGS arrival and are labelled separately. Some catalog events have no publicly available arrival data. Use **Street map** in Replay to see geographic context for the seven bundled clock-shift scenarios. [USGS earthquake catalog](https://earthquake.usgs.gov/fdsnws/event/1/) · [OpenStreetMap attribution](https://www.openstreetmap.org/copyright)
 
 ## Three-minute demo
 
-1. **Replay.** Set one station’s arrival shift and select **Run replay**. The **Example** button applies `LD.PAL +5 s`. Inspect the suspected station and compare the two estimates. Select **Reveal scenario** to see the injected offset, the catalog comparison, and the pick markers.
+1. **Replay.** Choose an earthquake, then select a station that recorded it. Set the arrival shift and select **Run replay**. **Mainshock example** applies `LD.PAL +5 s` to the April 5 mainshock. Inspect the suspected station and compare the two estimates. Select **Reveal scenario** to see the injected offset and the USGS comparison. The mainshock includes the LD.PAL waveform and pick markers.
 2. **Audit.** Switch to **Station audit** and select **Example**. This applies `LD.PAL +3 s` starting April 27. Inspect the first suspicious event, the May 1 confirmation, and the May 24 supporting reading. The evidence table exposes the individual event deviations.
 3. **Reset** either view to return to the recorded inputs.
 
@@ -40,7 +46,7 @@ Installing dependencies requires internet access. After installation, both views
 | Path | Purpose |
 |---|---|
 | `app.py` | Streamlit controls and presentation |
-| `quaketrace/` | Fixture loading, location fit, station audit, and offline charts |
+| `quaketrace/` | Fixture loading, location fit, station audit, maps, and live catalog exploration |
 | `scripts/fetch_fixtures.py` | Public source download, parsing, validation, and fixture generation |
 | `fixtures/` | Seven event origins, 45 arrival and station-epoch records, waveform, local outlines, and provenance manifest |
 | `tests/` | Fixture integrity, parser, solver, audit, and Streamlit interaction coverage |

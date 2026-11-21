@@ -5,11 +5,12 @@ from dataclasses import replace
 import streamlit as st
 
 from quaketrace.audit import audit
-from quaketrace.charts import audit_chart, replay_map, waveform_chart
+from quaketrace.charts import audit_chart, replay_map, replay_street_map, waveform_chart
 from quaketrace.data import (
     AUDIT_STATIONS, BASELINE_EVENTS, EVALUATION_EVENTS, MAINSHOCK, WAVEFORM_STATION,
     load_fixture,
 )
+from quaketrace.explorer import render_world
 from quaketrace.replay import Reading, diagnose, distance_km, fit_location
 
 st.set_page_config(page_title="QuakeTrace", page_icon="〰️", layout="wide")
@@ -30,10 +31,11 @@ def replay_solution(readings, station, offset):
     return diagnose(shifted)
 
 
-def replay_preset(station, offset):
+def replay_preset(event_id, station, offset):
+    st.session_state.replay_event = event_id
     st.session_state.replay_station = station
     st.session_state.replay_offset = offset
-    st.session_state.replay_scenario = (station, offset)
+    st.session_state.replay_scenario = (event_id, station, offset)
     st.session_state.replay_revealed = False
 
 
@@ -52,38 +54,67 @@ def event_date(fixture, event_id, *, with_time=False):
 
 
 def render_replay(fixture):
-    event = fixture.events[MAINSHOCK]
-    arrivals = [row for row in fixture.arrivals if row.event_id == MAINSHOCK]
-    time_reference = min(row.pick_time for row in arrivals)
-    readings = tuple(
-        Reading(
-            row.station_id, fixture.stations[(MAINSHOCK, row.station_id)],
-            (row.pick_time - time_reference).total_seconds(),
-        )
-        for row in arrivals
-    )
     st.header("Earthquake replay")
-    st.caption("April 5, 2024 · Tewksbury, New Jersey · Nine recorded Pg arrivals")
-    st.session_state.setdefault("replay_scenario", (WAVEFORM_STATION, 0.0))
+    st.session_state.setdefault("replay_scenario", (MAINSHOCK, WAVEFORM_STATION, 0.0))
     st.session_state.setdefault("replay_revealed", False)
+    stations_by_event = {
+        event_id: tuple(row.station_id for row in fixture.arrivals if row.event_id == event_id)
+        for event_id in fixture.events
+    }
+    event_ids = sorted(stations_by_event, key=lambda event_id: fixture.events[event_id].time)
+
+    def event_label(event_id):
+        name = "Tewksbury mainshock" if event_id == MAINSHOCK else event_id
+        return f"{event_date(fixture, event_id, with_time=True)} · {name}"
+
+    def change_event():
+        event_id = st.session_state.replay_event
+        station_ids = stations_by_event[event_id]
+        station = WAVEFORM_STATION if WAVEFORM_STATION in station_ids else station_ids[0]
+        replay_preset(event_id, station, 0.0)
 
     left, right = st.columns([1, 2.3], gap="large")
     with left:
+        selected_event = st.session_state.replay_scenario[0]
+        event_id = st.selectbox(
+            "Earthquake", event_ids, index=event_ids.index(selected_event),
+            format_func=event_label, key="replay_event", on_change=change_event,
+        )
+        station_ids = stations_by_event[event_id]
+        st.caption(f"New Jersey, United States · {len(station_ids)} recorded Pg arrivals")
         with st.form("replay_inputs", clear_on_submit=True):
-            station_ids = [row.station_id for row in arrivals]
             station = st.selectbox(
-                "Station to shift", station_ids, index=station_ids.index(WAVEFORM_STATION),
+                "Station to shift", station_ids, index=station_ids.index(st.session_state.replay_scenario[1]),
+                format_func=lambda station_id: " · ".join(filter(None, (
+                    station_id, fixture.stations[(event_id, station_id)].name,
+                ))),
                 key="replay_station",
             )
             offset = st.slider("Simulated arrival shift (s)", -5.0, 5.0, 0.0, step=0.25, key="replay_offset")
             if st.form_submit_button("Run replay", type="primary"):
-                st.session_state.replay_scenario = station, offset
+                st.session_state.replay_scenario = event_id, station, offset
                 st.session_state.replay_revealed = False
         controls = st.columns(2)
-        controls[0].button("Example", key="replay_example", on_click=replay_preset, args=(WAVEFORM_STATION, 5.0))
-        controls[1].button("Reset", key="replay_reset", on_click=replay_preset, args=(WAVEFORM_STATION, 0.0))
+        controls[0].button(
+            "Mainshock example", key="replay_example", on_click=replay_preset,
+            args=(MAINSHOCK, WAVEFORM_STATION, 5.0),
+        )
+        controls[1].button(
+            "Reset", key="replay_reset", on_click=replay_preset,
+            args=(event_id, station, 0.0),
+        )
 
-    station, offset = st.session_state.replay_scenario
+    event_id, station, offset = st.session_state.replay_scenario
+    event = fixture.events[event_id]
+    arrivals = [row for row in fixture.arrivals if row.event_id == event_id]
+    time_reference = min(row.pick_time for row in arrivals)
+    readings = tuple(
+        Reading(
+            row.station_id, fixture.stations[(event_id, row.station_id)],
+            (row.pick_time - time_reference).total_seconds(),
+        )
+        for row in arrivals
+    )
     result = replay_solution(readings, station, offset)
     with left:
         st.subheader("Station evidence")
@@ -116,14 +147,33 @@ def render_replay(fixture):
             if result.candidate:
                 distance = distance_km(result.candidate.fit.location, event)
                 metrics[2].metric("Suspect excluded to USGS", f"{distance:.1f} km")
-        st.plotly_chart(replay_map(fixture, result, revealed), key="replay_map")
+        if st.toggle("Street map", key="replay_street_map", help="Show the OpenStreetMap basemap when online."):
+            st.plotly_chart(
+                replay_street_map(fixture, event_id, result, revealed), key="replay_map",
+                config={"scrollZoom": True},
+            )
+            st.caption("[© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)")
+        else:
+            st.plotly_chart(replay_map(fixture, event_id, result, revealed), key="replay_map")
+        with st.expander("Stations on this map"):
+            st.dataframe([
+                {
+                    "Station": row.station_id,
+                    "Site": fixture.stations[(event_id, row.station_id)].name,
+                    "Country": "United States",
+                    "Latitude": round(fixture.stations[(event_id, row.station_id)].latitude, 4),
+                    "Longitude": round(fixture.stations[(event_id, row.station_id)].longitude, 4),
+                }
+                for row in arrivals
+            ], hide_index=True, width="stretch")
 
-    st.subheader("LD.PAL vertical waveform")
-    wave_pick = next(row for row in arrivals if row.station_id == WAVEFORM_STATION)
-    marker_shift = offset if revealed and station == WAVEFORM_STATION else None
-    st.plotly_chart(
-        waveform_chart(fixture, wave_pick.pick_time, marker_shift), key="waveform",
-    )
+    if event_id == MAINSHOCK:
+        st.subheader("LD.PAL vertical waveform")
+        wave_pick = next(row for row in arrivals if row.station_id == WAVEFORM_STATION)
+        marker_shift = offset if revealed and station == WAVEFORM_STATION else None
+        st.plotly_chart(
+            waveform_chart(fixture, wave_pick.pick_time, marker_shift), key="waveform",
+        )
 
 
 def render_audit(fixture):
@@ -204,15 +254,20 @@ def render_audit(fixture):
 
 
 st.title("QuakeTrace")
-view = st.radio("View", ("Earthquake replay", "Station audit"), horizontal=True, label_visibility="collapsed")
-try:
-    fixture = fixture_data()
-except (OSError, ValueError, KeyError) as error:
-    st.error(f"Could not load the local demo fixtures. Restore the fixtures folder or rerun the fixture downloader. {error}")
-    st.stop()
-
-if view == "Earthquake replay":
-    render_replay(fixture)
+view = st.radio(
+    "View", ("Earthquake replay", "Station audit", "World explorer"), horizontal=True,
+    label_visibility="collapsed",
+)
+if view == "World explorer":
+    render_world()
 else:
-    render_audit(fixture)
+    try:
+        fixture = fixture_data()
+    except (OSError, ValueError, KeyError) as error:
+        st.error(f"Could not load the local demo fixtures. Restore the fixtures folder or rerun the fixture downloader. {error}")
+        st.stop()
+    if view == "Earthquake replay":
+        render_replay(fixture)
+    else:
+        render_audit(fixture)
 st.caption("Data: USGS ComCat and EarthScope / Lamont-Doherty. Map outlines: Natural Earth.")

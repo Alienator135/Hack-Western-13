@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 from .audit import AuditResult, THRESHOLD_S
-from .data import BASELINE_EVENTS, EVALUATION_EVENTS, MAINSHOCK, Fixture, WAVEFORM_STATION
+from .data import BASELINE_EVENTS, EVALUATION_EVENTS, Fixture, WAVEFORM_STATION
 from .replay import ReplayResult, project
 
 GREEN = "#176d63"
@@ -15,7 +15,54 @@ INK = "#273556"
 MUTED = "#687e77"
 
 
-def replay_map(fixture: Fixture, result: ReplayResult, revealed: bool):
+def street_map_layout(figure, latitude, longitude, zoom, revision, *, height=480):
+    figure.update_layout(
+        map={
+            "style": "open-street-map",
+            "center": {"lat": max(-83, min(83, latitude)), "lon": longitude},
+            "zoom": zoom, "uirevision": revision,
+        },
+        height=height, margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        legend={"orientation": "h", "yanchor": "top", "y": 0.99, "bgcolor": "rgba(255,255,255,0.9)"},
+    )
+    return figure
+
+
+def replay_street_map(fixture: Fixture, event_id: str, result: ReplayResult, revealed: bool):
+    stations = [
+        (station, location)
+        for (event, station), location in fixture.stations.items() if event == event_id
+    ]
+    candidate = result.candidate
+    figure = go.Figure(go.Scattermap(
+        lat=[location.latitude for _, location in stations],
+        lon=[location.longitude for _, location in stations],
+        customdata=[(station, location.name) for station, location in stations],
+        mode="markers", name="Stations",
+        marker={
+            "size": [14 if candidate and station == candidate.station_id else 9 for station, _ in stations],
+            "color": [ORANGE if candidate and station == candidate.station_id else MUTED for station, _ in stations],
+        },
+        hovertemplate="%{customdata[1]}<br>%{customdata[0]} · United States<extra></extra>",
+    ))
+    estimates = []
+    if result.all_stations:
+        estimates.append((result.all_stations.location, "All stations", ORANGE, 17))
+    if candidate:
+        estimates.append((candidate.fit.location, "Suspect excluded", GREEN, 14))
+    if revealed:
+        estimates.append((fixture.events[event_id], "USGS reference", INK, 10))
+    for location, label, color, size in estimates:
+        figure.add_trace(go.Scattermap(
+            lat=[location.latitude], lon=[location.longitude], mode="markers", name=label,
+            marker={"color": color, "size": size}, hovertemplate="%{fullData.name}<extra></extra>",
+        ))
+    latitude = np.mean([location.latitude for _, location in stations])
+    longitude = np.mean([location.longitude for _, location in stations])
+    return street_map_layout(figure, latitude, longitude, 6.8, event_id)
+
+
+def replay_map(fixture: Fixture, event_id: str, result: ReplayResult, revealed: bool):
     fig = go.Figure()
     for feature in fixture.outlines["features"]:
         geometry = feature["geometry"]
@@ -32,19 +79,28 @@ def replay_map(fixture: Fixture, result: ReplayResult, revealed: bool):
                 )
 
     stations = {
-        station: coords for (event, station), coords in fixture.stations.items() if event == MAINSHOCK
+        station: coords for (event, station), coords in fixture.stations.items() if event == event_id
     }
     scatter_data = [(station, *project(coords.latitude, coords.longitude)) for station, coords in stations.items()]
     station_ids, east, north = zip(*scatter_data)
+    cities = (("New York City", 40.7128, -74.0060), ("Philadelphia", 39.9526, -75.1652))
+    city_points = [project(latitude, longitude) for _, latitude, longitude in cities]
+    fig.add_scatter(
+        x=[point[0] for point in city_points], y=[point[1] for point in city_points],
+        text=[name for name, _, _ in cities], mode="markers+text", textposition="bottom left",
+        textfont={"color": INK, "size": 11}, marker={"color": INK, "size": 4},
+        showlegend=False, hoverinfo="skip",
+    )
     suspect = result.candidate.station_id if result.candidate else None
     fig.add_scatter(
-        x=east, y=north, text=station_ids, name="Stations", mode="markers",
+        x=east, y=north, customdata=[(station, stations[station].name) for station in station_ids],
+        name="Stations", mode="markers",
         marker={
             "size": [13 if station == suspect else 9 for station in station_ids],
             "color": [ORANGE if station == suspect else MUTED for station in station_ids],
             "symbol": "triangle-up", "line": {"color": "white", "width": 1},
         },
-        hovertemplate="%{text}<extra></extra>",
+        hovertemplate="%{customdata[1]}<br>%{customdata[0]} · United States<extra></extra>",
     )
 
     def marker(location, label, symbol, color, size):
@@ -62,7 +118,7 @@ def replay_map(fixture: Fixture, result: ReplayResult, revealed: bool):
     if result.candidate:
         positions.append(marker(result.candidate.fit.location, "Suspect excluded", "circle", GREEN, 14))
     if revealed:
-        positions.append(marker(fixture.events[MAINSHOCK], "USGS reference", "star", INK, 16))
+        positions.append(marker(fixture.events[event_id], "USGS reference", "star", INK, 16))
     xs, ys = zip(*positions)
     fig.update_xaxes(title="East (km)", range=[min(xs) - 13, max(xs) + 13], zeroline=False)
     fig.update_yaxes(

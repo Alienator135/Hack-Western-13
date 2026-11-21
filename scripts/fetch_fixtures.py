@@ -9,12 +9,11 @@ import io
 import json
 import math
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -22,27 +21,16 @@ from quaketrace.data import (
     AUDIT_STATIONS, BASELINE_EVENTS, DEFAULT_FIXTURES, EVALUATION_EVENTS, MAINSHOCK,
     REPLAY_STATIONS, WAVEFORM_STATION, utc,
 )
+from quaketrace.sources import EARTHSCOPE, USGS_DETAIL, preferred_origin, product_url, station_metadata
 
-USGS_DETAIL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail"
-EARTHSCOPE = "https://service.earthscope.org/fdsnws"
-OUTLINE_URL = (
-    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.1/geojson/"
-    "ne_110m_admin_1_states_provinces.geojson"
-)
+NATURAL_EARTH = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.1/geojson"
+OUTLINE_URL = f"{NATURAL_EARTH}/ne_110m_admin_1_states_provinces.geojson"
+COUNTRIES_URL = f"{NATURAL_EARTH}/ne_50m_admin_0_countries.geojson"
 STATE_CODES = {"NJ", "NY", "PA", "CT", "DE", "MA", "MD", "RI"}
 
 
 def parse_quakeml(event_id: str, content: bytes, station_ids: tuple[str, ...]):
-    root = ElementTree.fromstring(content)
-    event = root.find("./{*}eventParameters/{*}event")
-    if event is None:
-        raise ValueError(f"{event_id}: missing event")
-    preferred = event.findtext("{*}preferredOriginID")
-    origin = next(
-        (node for node in event.findall("{*}origin") if node.get("publicID") == preferred), None
-    )
-    if not preferred or origin is None:
-        raise ValueError(f"{event_id}: missing preferred origin")
+    event, origin = preferred_origin(content)
     catalog = {
         "id": event_id,
         "time": utc(origin.findtext("{*}time/{*}value", "")).isoformat(),
@@ -90,53 +78,18 @@ def parse_quakeml(event_id: str, content: bytes, station_ids: tuple[str, ...]):
     return catalog, [selected[station][1] for station in station_ids]
 
 
-def product_url(detail: dict) -> str:
-    phases = detail["properties"]["products"].get("phase-data", [])
-    available = [
-        product for product in phases
-        if product.get("status") != "DELETE"
-        and product.get("contents", {}).get("quakeml.xml", {}).get("url")
-    ]
-    if not available:
-        raise ValueError("USGS event has no active phase-data product containing QuakeML.")
-    preferred = max(
-        available, key=lambda product: (product.get("preferredWeight", 0), product.get("updateTime", 0))
-    )
-    return preferred["contents"]["quakeml.xml"]["url"]
-
-
 def station_locations(event: dict, station_ids: tuple[str, ...], fetch):
-    networks = sorted({station.split(".")[0] for station in station_ids})
-    names = sorted({station.split(".")[1] for station in station_ids})
-    event_time = utc(event["time"])
-    query = urlencode({
-        "net": ",".join(networks), "sta": ",".join(names),
-        "starttime": event_time.isoformat(), "endtime": (event_time + timedelta(seconds=1)).isoformat(),
-        "level": "station", "format": "text",
-    })
-    content = fetch(f"{EARTHSCOPE}/station/1/query?{query}").decode("utf-8")
-    eligible = {}
-    for line in content.splitlines():
-        if line.startswith("#") or not line.strip():
-            continue
-        net, sta, latitude, longitude, _, _, start, end = line.split("|")
-        station_id = f"{net}.{sta}"
-        if station_id not in station_ids:
-            continue
-        begin = utc(f"{start}Z")
-        if begin > event_time or (end and utc(f"{end}Z") <= event_time):
-            continue
-        row = {
-            "event_id": event["id"], "station_id": station_id,
-            "latitude": float(latitude), "longitude": float(longitude),
-        }
-        if station_id not in eligible or begin > eligible[station_id][0]:
-            eligible[station_id] = (begin, row)
-
+    eligible = station_metadata(utc(event["time"]), set(station_ids), fetch)
     missing = set(station_ids) - eligible.keys()
     if missing:
         raise ValueError(f"{event['id']}: missing station epochs for {', '.join(sorted(missing))}")
-    return [eligible[station][1] for station in station_ids]
+    return [
+        {
+            "event_id": event["id"], "station_id": station, "latitude": eligible[station].latitude,
+            "longitude": eligible[station].longitude, "name": eligible[station].name,
+        }
+        for station in station_ids
+    ]
 
 
 def waveform_csv(pick: dict, fetch) -> str:
@@ -180,8 +133,11 @@ def fetch_fixtures(output: Path) -> None:
     for event_id in BASELINE_EVENTS + EVALUATION_EVENTS:
         station_ids = REPLAY_STATIONS if event_id == MAINSHOCK else AUDIT_STATIONS
         detail = json.loads(fetch(f"{USGS_DETAIL}/{event_id}.geojson"))
-        phase_sources[event_id] = product_url(detail)
-        origin, picks = parse_quakeml(event_id, fetch(phase_sources[event_id]), station_ids)
+        phase_source = product_url(detail)
+        if not phase_source:
+            raise ValueError(f"{event_id}: missing active USGS phase-data product")
+        phase_sources[event_id] = phase_source
+        origin, picks = parse_quakeml(event_id, fetch(phase_source), station_ids)
         events.append(origin)
         stations.extend(station_locations(origin, station_ids, fetch))
         arrivals.extend(picks)
@@ -203,12 +159,22 @@ def fetch_fixtures(output: Path) -> None:
     if {feature["properties"]["postal"] for feature in outlines["features"]} != STATE_CODES:
         raise ValueError("Natural Earth is missing one or more regional outlines.")
 
+    country_shapes = json.loads(fetch(COUNTRIES_URL))
+    countries = {"type": "FeatureCollection", "features": [
+        {
+            "type": "Feature",
+            "properties": {"name": feature["properties"]["ADMIN"]},
+            "geometry": feature["geometry"],
+        }
+        for feature in country_shapes["features"]
+    ]}
     files = {
         "events.json": json.dumps(events, indent=2) + "\n",
         "stations.json": json.dumps(stations, indent=2) + "\n",
         "arrivals.json": json.dumps(arrivals, indent=2) + "\n",
         "waveform.csv": waveform,
         "outlines.geojson": json.dumps(outlines, separators=(",", ":")) + "\n",
+        "countries.geojson": json.dumps(countries, separators=(",", ":")) + "\n",
     }
     manifest = {
         "schema_version": 1, "phase_data_by_event": phase_sources, "sources": sources,

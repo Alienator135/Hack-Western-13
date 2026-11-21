@@ -3,270 +3,315 @@
     "event_id": "us7000ma74",
     "station_id": "PE.PSUB",
     "latitude": 39.92726,
-    "longitude": -75.45126
+    "longitude": -75.45126,
+    "name": "PSU Brandywine Campus, Media, PA"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "LD.NPNY",
     "latitude": 41.75459,
-    "longitude": -74.143539
+    "longitude": -74.143539,
+    "name": "Mohonk Preserve, New Paltz, NY"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "LD.BRNY",
     "latitude": 41.414036,
-    "longitude": -74.011889
+    "longitude": -74.011889,
+    "name": "Black Rock Forest, Cornwall, NY"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "LD.FOR",
     "latitude": 40.8603,
-    "longitude": -73.8852
+    "longitude": -73.8852,
+    "name": "Fordham University, The Bronx, NYC"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "N4.L59A",
     "latitude": 42.1902,
-    "longitude": -75.0426
+    "longitude": -75.0426,
+    "name": "Walton, NY, USA"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "LD.PAL",
     "latitude": 41.0056,
-    "longitude": -73.9079
+    "longitude": -73.9079,
+    "name": "Palisades, New York"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "PE.PAPL",
     "latitude": 41.29899,
-    "longitude": -75.21392
+    "longitude": -75.21392,
+    "name": "Promised Land State Park, Greentown, PA"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "N4.N58A",
     "latitude": 40.8396,
-    "longitude": -76.7158
+    "longitude": -76.7158,
+    "name": "Sunbury, PA, USA"
   },
   {
     "event_id": "us7000ma74",
     "station_id": "N4.P61A",
     "latitude": 39.6734,
-    "longitude": -74.7919
+    "longitude": -74.7919,
+    "name": "Hammonton, NJ, USA"
   },
   {
     "event_id": "us7000maaw",
     "station_id": "PE.PSUB",
     "latitude": 39.92726,
-    "longitude": -75.45126
+    "longitude": -75.45126,
+    "name": "PSU Brandywine Campus, Media, PA"
   },
   {
     "event_id": "us7000maaw",
     "station_id": "LD.NPNY",
     "latitude": 41.75459,
-    "longitude": -74.143539
+    "longitude": -74.143539,
+    "name": "Mohonk Preserve, New Paltz, NY"
   },
   {
     "event_id": "us7000maaw",
     "station_id": "LD.BRNY",
     "latitude": 41.414036,
-    "longitude": -74.011889
+    "longitude": -74.011889,
+    "name": "Black Rock Forest, Cornwall, NY"
   },
   {
     "event_id": "us7000maaw",
     "station_id": "LD.FOR",
     "latitude": 40.8603,
-    "longitude": -73.8852
+    "longitude": -73.8852,
+    "name": "Fordham University, The Bronx, NYC"
   },
   {
     "event_id": "us7000maaw",
     "station_id": "N4.L59A",
     "latitude": 42.1902,
-    "longitude": -75.0426
+    "longitude": -75.0426,
+    "name": "Walton, NY, USA"
   },
   {
     "event_id": "us7000maaw",
     "station_id": "LD.PAL",
     "latitude": 41.0056,
-    "longitude": -73.9079
+    "longitude": -73.9079,
+    "name": "Palisades, New York"
   },
   {
     "event_id": "us7000mab9",
     "station_id": "PE.PSUB",
     "latitude": 39.92726,
-    "longitude": -75.45126
+    "longitude": -75.45126,
+    "name": "PSU Brandywine Campus, Media, PA"
   },
   {
     "event_id": "us7000mab9",
     "station_id": "LD.NPNY",
     "latitude": 41.75459,
-    "longitude": -74.143539
+    "longitude": -74.143539,
+    "name": "Mohonk Preserve, New Paltz, NY"
   },
   {
     "event_id": "us7000mab9",
     "station_id": "LD.BRNY",
     "latitude": 41.414036,
-    "longitude": -74.011889
+    "longitude": -74.011889,
+    "name": "Black Rock Forest, Cornwall, NY"
   },
   {
     "event_id": "us7000mab9",
     "station_id": "LD.FOR",
     "latitude": 40.8603,
-    "longitude": -73.8852
+    "longitude": -73.8852,
+    "name": "Fordham University, The Bronx, NYC"
   },
   {
     "event_id": "us7000mab9",
     "station_id": "N4.L59A",
     "latitude": 42.1902,
-    "longitude": -75.0426
+    "longitude": -75.0426,
+    "name": "Walton, NY, USA"
   },
   {
     "event_id": "us7000mab9",
     "station_id": "LD.PAL",
     "latitude": 41.0056,
-    "longitude": -73.9079
+    "longitude": -73.9079,
+    "name": "Palisades, New York"
   },
   {
     "event_id": "us7000mb70",
     "station_id": "PE.PSUB",
     "latitude": 39.92726,
-    "longitude": -75.45126
+    "longitude": -75.45126,
+    "name": "PSU Brandywine Campus, Media, PA"
   },
   {
     "event_id": "us7000mb70",
     "station_id": "LD.NPNY",
     "latitude": 41.75459,
-    "longitude": -74.143539
+    "longitude": -74.143539,
+    "name": "Mohonk Preserve, New Paltz, NY"
   },
   {
     "event_id": "us7000mb70",
     "station_id": "LD.BRNY",
     "latitude": 41.414036,
-    "longitude": -74.011889
+    "longitude": -74.011889,
+    "name": "Black Rock Forest, Cornwall, NY"
   },
   {
     "event_id": "us7000mb70",
     "station_id": "LD.FOR",
     "latitude": 40.8603,
-    "longitude": -73.8852
+    "longitude": -73.8852,
+    "name": "Fordham University, The Bronx, NYC"
   },
   {
     "event_id": "us7000mb70",
     "station_id": "N4.L59A",
     "latitude": 42.1902,
-    "longitude": -75.0426
+    "longitude": -75.0426,
+    "name": "Walton, NY, USA"
   },
   {
     "event_id": "us7000mb70",
     "station_id": "LD.PAL",
     "latitude": 41.0056,
-    "longitude": -73.9079
+    "longitude": -73.9079,
+    "name": "Palisades, New York"
   },
   {
     "event_id": "us6000mub7",
     "station_id": "PE.PSUB",
     "latitude": 39.92726,
-    "longitude": -75.45126
+    "longitude": -75.45126,
+    "name": "PSU Brandywine Campus, Media, PA"
   },
   {
     "event_id": "us6000mub7",
     "station_id": "LD.NPNY",
     "latitude": 41.75459,
-    "longitude": -74.143539
+    "longitude": -74.143539,
+    "name": "Mohonk Preserve, New Paltz, NY"
   },
   {
     "event_id": "us6000mub7",
     "station_id": "LD.BRNY",
     "latitude": 41.414036,
-    "longitude": -74.011889
+    "longitude": -74.011889,
+    "name": "Black Rock Forest, Cornwall, NY"
   },
   {
     "event_id": "us6000mub7",
     "station_id": "LD.FOR",
     "latitude": 40.8603,
-    "longitude": -73.8852
+    "longitude": -73.8852,
+    "name": "Fordham University, The Bronx, NYC"
   },
   {
     "event_id": "us6000mub7",
     "station_id": "N4.L59A",
     "latitude": 42.1902,
-    "longitude": -75.0426
+    "longitude": -75.0426,
+    "name": "Walton, NY, USA"
   },
   {
     "event_id": "us6000mub7",
     "station_id": "LD.PAL",
     "latitude": 41.0056,
-    "longitude": -73.9079
+    "longitude": -73.9079,
+    "name": "Palisades, New York"
   },
   {
     "event_id": "us6000mvg6",
     "station_id": "PE.PSUB",
     "latitude": 39.92726,
-    "longitude": -75.45126
+    "longitude": -75.45126,
+    "name": "PSU Brandywine Campus, Media, PA"
   },
   {
     "event_id": "us6000mvg6",
     "station_id": "LD.NPNY",
     "latitude": 41.75459,
-    "longitude": -74.143539
+    "longitude": -74.143539,
+    "name": "Mohonk Preserve, New Paltz, NY"
   },
   {
     "event_id": "us6000mvg6",
     "station_id": "LD.BRNY",
     "latitude": 41.414036,
-    "longitude": -74.011889
+    "longitude": -74.011889,
+    "name": "Black Rock Forest, Cornwall, NY"
   },
   {
     "event_id": "us6000mvg6",
     "station_id": "LD.FOR",
     "latitude": 40.8603,
-    "longitude": -73.8852
+    "longitude": -73.8852,
+    "name": "Fordham University, The Bronx, NYC"
   },
   {
     "event_id": "us6000mvg6",
     "station_id": "N4.L59A",
     "latitude": 42.1902,
-    "longitude": -75.0426
+    "longitude": -75.0426,
+    "name": "Walton, NY, USA"
   },
   {
     "event_id": "us6000mvg6",
     "station_id": "LD.PAL",
     "latitude": 41.0056,
-    "longitude": -73.9079
+    "longitude": -73.9079,
+    "name": "Palisades, New York"
   },
   {
     "event_id": "us6000n0ne",
     "station_id": "PE.PSUB",
     "latitude": 39.92726,
-    "longitude": -75.45126
+    "longitude": -75.45126,
+    "name": "PSU Brandywine Campus, Media, PA"
   },
   {
     "event_id": "us6000n0ne",
     "station_id": "LD.NPNY",
     "latitude": 41.75459,
-    "longitude": -74.143539
+    "longitude": -74.143539,
+    "name": "Mohonk Preserve, New Paltz, NY"
   },
   {
     "event_id": "us6000n0ne",
     "station_id": "LD.BRNY",
     "latitude": 41.414036,
-    "longitude": -74.011889
+    "longitude": -74.011889,
+    "name": "Black Rock Forest, Cornwall, NY"
   },
   {
     "event_id": "us6000n0ne",
     "station_id": "LD.FOR",
     "latitude": 40.8603,
-    "longitude": -73.8852
+    "longitude": -73.8852,
+    "name": "Fordham University, The Bronx, NYC"
   },
   {
     "event_id": "us6000n0ne",
     "station_id": "N4.L59A",
     "latitude": 42.1902,
-    "longitude": -75.0426
+    "longitude": -75.0426,
+    "name": "Walton, NY, USA"
   },
   {
     "event_id": "us6000n0ne",
     "station_id": "LD.PAL",
     "latitude": 41.0056,
-    "longitude": -73.9079
+    "longitude": -73.9079,
+    "name": "Palisades, New York"
   }
 ]
