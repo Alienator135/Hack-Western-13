@@ -144,11 +144,6 @@ class ServerTests(unittest.TestCase):
         _, _, body = self.get(f"/api/lab/runs?event={MAINSHOCK}")
         self.assertEqual(len(json.loads(body)["runs"]), 9)
 
-    def test_config_exposes_the_maps_key_from_the_environment(self):
-        with patch.dict("os.environ", {server.GOOGLE_KEY_ENV: "test-key"}):
-            _, _, body = self.get("/api/config")
-        self.assertEqual(json.loads(body)["googleMapsKey"], "test-key")
-
     def test_errors_are_json_and_paths_cannot_escape_web_root(self):
         for path, code in (("/api/replay?offset=abc", 400), ("/api/missing", 404), ("/..%2Fserver.py", 404)):
             with self.assertRaises(HTTPError) as caught:

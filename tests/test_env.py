@@ -18,7 +18,7 @@ class EnvTests(unittest.TestCase):
             "PGHOST=from-file\n"
             "not a variable line\n"
             "QUAKETRACE_TIGER_DSN=\n"
-            "GOOGLE_MAPS_API_KEY=\n"
+            "PGPORT=\n"
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".env"
@@ -30,7 +30,7 @@ class EnvTests(unittest.TestCase):
                 self.assertEqual(os.environ["PGUSER"], "tsdbadmin")
                 self.assertEqual(os.environ["PGHOST"], "from-shell")
         self.assertNotIn("PGHOST", loaded)
-        self.assertNotIn("GOOGLE_MAPS_API_KEY", loaded)
+        self.assertNotIn("PGPORT", loaded)
         # A blank QUAKETRACE_TIGER_DSN line (as in .env.example) still falls back to the service URL.
         self.assertIn(TIGER_DSN_ENV, loaded)
 

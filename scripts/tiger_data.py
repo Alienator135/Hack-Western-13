@@ -14,6 +14,7 @@ from quaketrace.api import history_view
 from quaketrace.audit import audit
 from quaketrace.env import load_env
 from quaketrace.history import history_available, load_history
+from quaketrace.live import LOOKBACK_DAYS, ingest
 from quaketrace.data import AUDIT_STATIONS, EVALUATION_EVENTS, TIGER_DSN_ENV, WAVEFORM_STATION, load_fixture
 from quaketrace.tiger import (
     TigerDataError, read_demo_arrivals, seed_demo, seed_history, weekly_station_history,
@@ -36,6 +37,11 @@ def main() -> int:
         help="Drop and recreate quaketrace.picks, quaketrace.events and quaketrace.station_monthly first "
              "so the current chunk and compression settings apply. The demo arrivals table is kept.",
     )
+    ingest_parser = commands.add_parser("ingest", help="Add quakes USGS published since Tiger's newest one")
+    ingest_parser.add_argument("--lookback-days", type=float, default=LOOKBACK_DAYS,
+                               help="Also recheck this many days before the newest quake (late phase data)")
+    ingest_parser.add_argument("--watch", type=float, metavar="MINUTES",
+                               help="Keep running, checking USGS every MINUTES")
     health = commands.add_parser("health", help="Query monthly station clock health from Tiger Data")
     health.add_argument("--station", help="Inject a clock shift into this station's history")
     health.add_argument("--onset", help="Date the injected shift starts, e.g. 2024-04-27")
@@ -86,6 +92,21 @@ def main() -> int:
             )
             if not args.rebuild and (summary.get("compressionRatio") or 0) < 1.5 and summary.get("compressedChunks"):
                 print("Compression is barely saving space. Run seed-history --rebuild to apply the current settings.")
+        elif args.command == "ingest":
+            while True:
+                summary = ingest(dsn, lookback_days=args.lookback_days)
+                print(
+                    f"Checked {summary['checked']} USGS quakes from {summary['windowStart'][:10]} to "
+                    f"{summary['windowEnd'][:16]}Z · added {summary['newEvents']} quakes, {summary['newPicks']:,} picks."
+                )
+                for event in summary["added"]:
+                    magnitude = f"M{event['magnitude']:.1f}" if event["magnitude"] is not None else "M?"
+                    print(f"  + {event['time'][:16]}Z {magnitude:<5} {event['place']}  ({event['id']})")
+                if summary["error"]:
+                    print(summary["error"], file=sys.stderr)
+                if not args.watch:
+                    break
+                time.sleep(args.watch * 60)
         elif args.command == "health":
             started = time.perf_counter()
             view = history_view(args.station, args.onset, args.offset)

@@ -5,8 +5,8 @@ Run from the repository root:
     python server.py            # http://127.0.0.1:8000
     python server.py --port 9000
 
-Set GOOGLE_MAPS_API_KEY to enable the Google Maps, satellite, and 3D Earth views.
-Without it the UI uses the bundled state outlines and still works offline.
+Map, satellite and 3D views use free, keyless MapLibre tiles in the browser.
+Without internet the UI uses the bundled state outlines and still works offline.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import logging
 import mimetypes
 import re
 import threading
+import time
 from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,8 +31,6 @@ from quaketrace.data import MAINSHOCK, TIGER_DSN_ENV, load_fixture
 from quaketrace.env import load_env
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
-GOOGLE_KEY_ENV = "GOOGLE_MAPS_API_KEY"
-GOOGLE_MAP_ID_ENV = "GOOGLE_MAPS_MAP_ID"
 logger = logging.getLogger("quaketrace.server")
 
 
@@ -70,13 +69,6 @@ def lab_runs_json(event_id: str, station: str | None, offset_s: float) -> bytes:
     return json.dumps(api.lab_runs(fixture(), event_id, station, offset_s)).encode()
 
 
-def config_json() -> bytes:
-    return json.dumps({
-        "googleMapsKey": getenv(GOOGLE_KEY_ENV, ""),
-        "googleMapId": getenv(GOOGLE_MAP_ID_ENV, "") or "DEMO_MAP_ID",
-    }).encode()
-
-
 def _offset(query: dict) -> float:
     raw = query.get("offset", ["0"])[0] or "0"
     value = float(raw)
@@ -86,8 +78,6 @@ def _offset(query: dict) -> float:
 
 
 def route(path: str, query: dict) -> bytes:
-    if path == "/api/config":
-        return config_json()
     if path == "/api/overview":
         return overview_json()
     if path == "/api/waveform":
@@ -180,10 +170,41 @@ def _warm_tiger():
     logger.info("History source: %s (warm-up %.0f ms)", view.get("source"), (perf_counter() - started) * 1000)
 
 
+INGEST_MINUTES_ENV = "QUAKETRACE_INGEST_MINUTES"
+DEFAULT_INGEST_MINUTES = 10.0
+
+
+def _live_ingest(minutes: float):
+    """Poll USGS for newly published quakes and add them to Tiger Data, forever."""
+    from quaketrace.live import ingest  # noqa: PLC0415
+    from quaketrace.tiger import TigerDataError  # noqa: PLC0415
+
+    while True:
+        try:
+            summary = ingest(getenv(TIGER_DSN_ENV))
+            if summary["error"]:
+                logger.warning("Live ingest: %s", summary["error"])
+            else:
+                logger.info(
+                    "Live ingest: checked %d USGS quakes, added %d quakes and %d picks",
+                    summary["checked"], summary["newEvents"], summary["newPicks"],
+                )
+        except TigerDataError as error:
+            logger.warning("Live ingest: %s", error)
+        except Exception:  # noqa: BLE001 - keep the loop alive for the demo
+            logger.exception("Live ingest failed")
+        time.sleep(minutes * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--ingest-minutes", type=float, default=None,
+        help=f"Check USGS for new quakes this often when Tiger Data is connected (0 disables; "
+             f"default {INGEST_MINUTES_ENV} or {DEFAULT_INGEST_MINUTES:g})",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     load_env()  # project .env (gitignored), e.g. Tiger Cloud credentials
@@ -191,11 +212,16 @@ def main():
     fixture()  # Fail fast if fixtures are missing.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     source = fixture().arrival_source
-    maps = "Google Maps enabled" if getenv(GOOGLE_KEY_ENV) else f"no {GOOGLE_KEY_ENV}, using offline map"
-    print(f"QuakeTrace on http://{args.host}:{args.port} · arrivals: {source} · {maps}", flush=True)
+    print(f"QuakeTrace on http://{args.host}:{args.port} · arrivals: {source}", flush=True)
     if getenv(TIGER_DSN_ENV):
         # Open the shared Tiger connection now so the first click in front of judges is fast.
         threading.Thread(target=_warm_tiger, daemon=True).start()
+        minutes = args.ingest_minutes
+        if minutes is None:
+            minutes = float(getenv(INGEST_MINUTES_ENV) or DEFAULT_INGEST_MINUTES)
+        if minutes > 0:
+            print(f"Live ingest: checking USGS for new quakes every {minutes:g} min", flush=True)
+            threading.Thread(target=_live_ingest, args=(minutes,), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

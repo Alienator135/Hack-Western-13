@@ -2,63 +2,142 @@
 
 QuakeTrace replays seven recorded earthquakes from the Tewksbury, New Jersey sequence and shows how a simulated station clock error can move an estimated epicentre. Its station audit uses the same USGS events to estimate when a persistent timing discrepancy first appeared and which later events support it.
 
-## Run locally
+## Quick start (about 2 minutes)
 
-Use Python 3.12. On Windows from PowerShell:
+You need **Python 3.12** and an internet connection for the first install. No database is required: the app runs fully offline from the bundled data, and Tiger Data is an optional upgrade (next section).
 
-```powershell
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -r requirements.txt
-.venv/Scripts/python.exe server.py
-```
-
-On macOS or Linux:
+**macOS / Linux**
 
 ```sh
+git clone https://github.com/Alienator135/Hack-Western-13.git
+cd Hack-Western-13
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python server.py
 ```
 
-Open http://127.0.0.1:8000. `server.py` serves the web UI in `web/` and a JSON API backed by the `quaketrace` package, using only the Python standard library on top of the existing requirements. Use `--port` to change the port.
+**Windows (PowerShell)**
 
-To run against Tiger Data, put your connection settings in a `.env` file in the repository root (see `.env.example`, or save Tiger Cloud's downloaded credentials file as `.env`). It is gitignored and loaded at startup, so the same commands work on Windows and macOS. On macOS, for example:
+```powershell
+git clone https://github.com/Alienator135/Hack-Western-13.git
+cd Hack-Western-13
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe server.py
+```
+
+Open **http://127.0.0.1:8000**. Use `--port 8765` to pick another port. Stop the server with **Ctrl+C**.
+
+That's it. The history card will say **Bundled copy** until you connect Tiger Data.
+
+## Tiger Data setup (about 5 minutes)
+
+Connecting Tiger Data (TimescaleDB) makes the **Station audit** run live against eight years of station history in a hypertable. You only do steps 1–3 once per Tiger service; on any other machine, step 2 (the `.env` file) is all you need.
+
+### 1. Create a free Tiger Cloud service
+
+1. Sign up at [tigerdata.com](https://www.tigerdata.com/) and open Tiger Console.
+2. Create a new service with **TimescaleDB** enabled (the default). Any region and the smallest size are fine. [Create a service guide](https://www.tigerdata.com/docs/get-started/quickstart/create-service)
+3. When the service is created, **download the credentials file** Tiger offers (a `.env`-style file with `TIMESCALE_SERVICE_URL` and `PG*` variables). If you missed it, copy the connection string from the service's **Connect** page instead. [Find your connection details](https://www.tigerdata.com/docs/integrate/find-connection-details)
+
+### 2. Put the credentials in `.env`
+
+Save the credentials as `.env` in the repository root. It is gitignored and loaded automatically by `server.py` and `scripts/tiger_data.py`.
+
+**Option A: use the downloaded file (easiest)**
 
 ```sh
-cp ~/Downloads/tiger-cloud-quaketrace-credentials.env .env
+cp ~/Downloads/tiger-cloud-*-credentials.env .env
+```
+
+On Windows: `Copy-Item $HOME\Downloads\tiger-cloud-*-credentials.env .env`
+
+**Option B: paste the connection string**
+
+```sh
+cp .env.example .env
+```
+
+Then open `.env` and fill in one line:
+
+```sh
+TIMESCALE_SERVICE_URL=postgres://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require
+```
+
+### 3. Load the data (one time per service)
+
+**macOS / Linux**
+
+```sh
+.venv/bin/python scripts/tiger_data.py seed
+.venv/bin/python scripts/tiger_data.py seed-history
+.venv/bin/python scripts/tiger_data.py verify
+```
+
+**Windows (PowerShell)**
+
+```powershell
+.venv/Scripts/python.exe scripts/tiger_data.py seed
+.venv/Scripts/python.exe scripts/tiger_data.py seed-history
+.venv/Scripts/python.exe scripts/tiger_data.py verify
+```
+
+| Command | What it does |
+|---|---|
+| `seed` | Creates the `quaketrace` schema and loads the 45 demo arrivals |
+| `seed-history` | Loads ~18,500 historical picks with `COPY`, creates the hypertable, compression and the `station_monthly` continuous aggregate, then prints row, chunk and compression totals |
+| `verify` | Checks that Tiger returns the same audit results as the bundled data |
+
+Both seed commands are safe to rerun; existing rows are skipped.
+
+### 4. Check it and start the app
+
+```sh
 .venv/bin/python scripts/tiger_data.py health --station LD.PAL --onset 2024-04-27 --offset 3
 .venv/bin/python server.py
 ```
 
-The Tiger service already holds the data once seeded, so a new machine only needs `.env`; run `seed` and `seed-history` again only for a new service.
+`health` runs the same query as the UI and should flag `LD.PAL`. In the browser, the history card now says **Live from Tiger Data** and shows the chunk count, compression ratio and query time.
 
-Installing dependencies requires internet access. After installation, everything works offline from the committed data; Tiger Data is used when `.env` provides a connection.
+### 5. Live updates (automatic)
 
-## Tiger Data
+While `server.py` runs with Tiger connected, it checks the live USGS catalog every 10 minutes and streams newly published quakes and their station picks into the hypertable. The continuous aggregate is real-time, so new picks appear in **Every station's clock** on the next query, and the history card shows when the feed last checked and how many quakes have streamed in. The first check after seeding catches up everything since the bundled history ends (December 2025).
 
-QuakeTrace keeps two things in Tiger Data (TimescaleDB):
+Each check also rechecks the 30 days before Tiger's newest quake, because USGS often publishes phase data days after a quake. Runs are logged in `quaketrace.ingest_runs`.
 
-- **Years of station timing history.** Every north-east US earthquake since 2018 with published USGS phase data, and every arrival those solutions used, in the `quaketrace.picks` hypertable. The hypertable uses yearly chunks; chunks older than 180 days are compressed (columnstore, ordered by station, phase and time), and the `quaketrace.station_monthly` continuous aggregate keeps each station's monthly mean P-wave residual up to date. **Station audit → Every station's clock** reads the aggregate. When a judge breaks a clock in history, the same view is computed live from the raw hypertable, with the shift applied in SQL.
+| To | Run |
+|---|---|
+| Ingest once by hand | `.venv/bin/python scripts/tiger_data.py ingest` |
+| Ingest every 5 minutes without the web server | `.venv/bin/python scripts/tiger_data.py ingest --watch 5` |
+| Change how often the server checks | `.venv/bin/python server.py --ingest-minutes 5` (or `QUAKETRACE_INGEST_MINUTES=5` in `.env`) |
+| Turn it off | `.venv/bin/python server.py --ingest-minutes 0` |
+
+If USGS is unreachable, the run is logged and the app keeps serving what Tiger already has.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Card still says **Bundled copy** | `.env` is missing or not in the repository root, or the server was started before you created it. Restart `server.py`. |
+| Connection or SSL error | Make sure the URL ends in `?sslmode=require` (or `PGSSLMODE=require` is set), and that the service shows as running in Tiger Console. |
+| Password authentication failed | The service URL may not contain the password. Add `PGPASSWORD=...` to `.env`. |
+| Wrong database used | Variables already set in your shell win over `.env`. Run `unset QUAKETRACE_TIGER_DSN TIMESCALE_SERVICE_URL` (or open a new terminal). |
+| `ingest` says "no history yet" | Run `seed-history` first; the live feed continues from the newest quake already in Tiger. |
+| "Compression is barely saving space" | Run `scripts/tiger_data.py seed-history --rebuild` to recreate only the history objects with current settings. |
+
+If Tiger is unreachable at any point, the app falls back to the bundled copy automatically, so a demo never depends on venue Wi-Fi.
+
+### Maps (free, no key)
+
+The Map, Satellite and Earth 3D views use [MapLibre GL JS](https://maplibre.org/) with free, keyless tiles: OpenStreetMap data from [OpenFreeMap](https://openfreemap.org/), [Esri World Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9) for satellite, and open terrain from AWS for the 3D globe. They need internet. Offline, the app falls back to its built-in map drawn from the bundled outlines.
+
+## What Tiger Data stores
+
+- **Years of station timing history.** Every north-east US earthquake since 2018 with published USGS phase data, and every arrival those solutions used, in the `quaketrace.picks` hypertable. It uses yearly chunks; chunks older than 180 days are compressed (columnstore, ordered by station, phase and time), and the `quaketrace.station_monthly` continuous aggregate keeps each station's monthly mean P-wave residual up to date. **Station audit → Every station's clock** reads the aggregate. When a judge breaks a clock in history, the same view is computed live from the raw hypertable, with the shift applied in SQL.
+- **Live quakes as USGS publishes them.** The server's live ingest adds each new north-east US quake with phase data to `quaketrace.events` (marked with `ingested_at`) and its picks to the same hypertable, so Tiger holds the only complete, up-to-date record. The bundled CSVs are the seed for a new service and the offline backup.
 - **The seven demo quakes.** The 45 bundled arrivals used by Present, the Solver lab and the seven-quake audit, in `quaketrace.arrivals`.
 
-1. In Tiger Console, create a service with **TimescaleDB** enabled and copy its PostgreSQL connection string. [Create a Tiger Cloud service](https://www.tigerdata.com/docs/get-started/quickstart/create-service) · [Find the connection details](https://www.tigerdata.com/docs/integrate/find-connection-details)
-2. From the repository root in PowerShell 7, enter the connection string in a masked prompt, load both datasets, and check them:
-
-   ```powershell
-   .venv/Scripts/python.exe -m pip install -r requirements.txt
-   $env:QUAKETRACE_TIGER_DSN = Read-Host -MaskInput "Tiger Data PostgreSQL connection string"
-   .venv/Scripts/python.exe scripts/tiger_data.py seed
-   .venv/Scripts/python.exe scripts/tiger_data.py seed-history
-   .venv/Scripts/python.exe scripts/tiger_data.py verify
-   .venv/Scripts/python.exe scripts/tiger_data.py health --station LD.PAL --onset 2024-04-27 --offset 3
-   .venv/Scripts/python.exe server.py
-   ```
-
-3. `seed-history` creates the schema, bulk-loads the picks with `COPY`, compresses old chunks, creates the continuous aggregate with a refresh policy, and prints the row, chunk, and compression totals. `health` runs the same query the UI uses and prints each station's status, so you can confirm Tiger flags the injected shift before presenting.
-
-The simplest setup: save the credentials file Tiger Cloud lets you download as `.env` in the repository root. Git ignores it, and `server.py` and `scripts/tiger_data.py` load it at startup, using `TIMESCALE_SERVICE_URL` and the `PG*` variables in it. Variables already set in your shell take precedence. Otherwise, start the server in the same shell where you set the connection string. With Tiger connected, the history card says **Live from Tiger Data** and shows the hypertable's chunk count, compression ratio, and each query's time. Without it, or if Tiger is unreachable, the card says **Bundled copy** and computes the same view from `fixtures/history`, so the demo never depends on venue Wi-Fi. Both seed commands can be rerun; existing rows are skipped. `seed-history --rebuild` drops and recreates only the history objects (`picks`, `events`, `station_monthly`) and reloads them, which is needed after changing chunk or compression settings. It leaves the demo arrivals table alone.
-
-The history bundle is built from USGS by `scripts/fetch_history.py`, which caches raw responses under `fixtures/raw/history` and backs off when USGS rate-limits. [TimescaleDB hypertables](https://www.tigerdata.com/docs/use-timescale/latest/hypertables/) · [Continuous aggregates](https://www.tigerdata.com/docs/use-timescale/latest/continuous-aggregates/) · [Compression](https://www.tigerdata.com/docs/use-timescale/latest/compression/)
+Connection settings are read from `QUAKETRACE_TIGER_DSN`, falling back to `TIMESCALE_SERVICE_URL`, plus the standard `PG*` variables. `seed-history --rebuild` drops and recreates only `picks`, `events` and `station_monthly`, and leaves the demo arrivals alone. The history bundle is built from USGS by `scripts/fetch_history.py`, which caches raw responses under `fixtures/raw/history` and backs off when USGS rate-limits. [Hypertables](https://www.tigerdata.com/docs/use-timescale/latest/hypertables/) · [Continuous aggregates](https://www.tigerdata.com/docs/use-timescale/latest/continuous-aggregates/) · [Compression](https://www.tigerdata.com/docs/use-timescale/latest/compression/)
 
 ## Solver lab
 
@@ -78,7 +157,7 @@ The app opens on **Present**, a step-by-step walkthrough meant to be presented t
 1. **The judge breaks a clock.** Hand over the laptop: they pick a station and a shift, or select **Let the app pick secretly**.
 2. **Walk through the 12 steps.** Each one has a sentence to say and an animation: stations and their arrival times, one candidate point, distance to a station, travel time at 6 km/s, the start time each station implies, the spread of start times as the point's score, scoring all 8,100 grid points, refining on a 250 m grid, the best point against USGS, leaving each station out in turn, and the culprit.
 3. **Reveal.** Injected against found shift, and the error against USGS with and without the suspect.
-4. **Scale it up with Tiger Data.** **Scale it up: every quake since 2018 in Tiger Data** injects the judge's shift into eight years of real station history and shows Tiger Data catch it, with the hypertable, compression and query time on screen.
+4. **Scale it up with Tiger Data.** **Scale it up: every quake since 2018 in Tiger Data** injects the judge's shift into eight years of real station history and shows Tiger Data catch it, with the hypertable, compression and query time on screen. Point at the live-feed chip: Tiger keeps growing as USGS publishes new quakes, with no redeploy.
 
 **Station audit** also shows the seven-quake audit below the Tiger card, and **Solver lab** shows every grid point the solver tests. Both are there for judges' questions.
 

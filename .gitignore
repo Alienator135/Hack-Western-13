@@ -9,3 +9,5 @@ __pycache__/
 .streamlit/secrets.toml
 fixtures/raw/
 fixtures/.fetch-*/
+*.env
+.DS_Store

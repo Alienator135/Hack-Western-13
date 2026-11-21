@@ -500,7 +500,7 @@ def history_view(station: str | None = None, onset: str | None = None, offset_s:
             "picks": len(history.picks), "events": len(history.events),
             "stations": len({pick.station_id for pick in history.picks}),
             "first": min(times).isoformat(), "last": max(times).isoformat(),
-            "chunks": None, "compressedChunks": None, "compressionRatio": None,
+            "chunks": None, "compressedChunks": None, "compressionRatio": None, "live": None,
         }
         result = (busiest, names, buckets, stats, "bundled file")
         source = "local"

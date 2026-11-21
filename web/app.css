@@ -178,7 +178,9 @@ details.card > summary { cursor: pointer; padding: 14px 0; font-size: 14px; font
 .map-frame { position: relative; width: 100%; aspect-ratio: 800 / 560; border-radius: 8px; overflow: hidden; background: var(--land); }
 .map-frame.small { aspect-ratio: 800 / 600; }
 .map-frame > .map-host, .map-frame > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.map-frame gmp-map-3d { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ml-marker { pointer-events: auto; }
+.ml-arrow { font-size: 14px; line-height: 1; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.map-frame .maplibregl-ctrl-attrib { font-size: 10px; }
 .basemap { position: absolute; top: 24px; right: 24px; display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: #FFF; z-index: 5; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 .basemap button { padding: 10px 12px; background: #FFF; color: var(--muted); border: 0; font-size: 13px; font-weight: 500; cursor: pointer; }
 .basemap button + button { border-left: 1px solid var(--line); }

@@ -322,7 +322,9 @@ def seed_history(dsn: str, events, picks, *, rebuild: bool = False) -> dict:
             with connection.cursor() as cursor:
                 cursor.executemany(
                     """
-                    INSERT INTO quaketrace.events VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO quaketrace.events
+                        (event_id, event_time, latitude, longitude, depth_km, magnitude, place)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (event_id) DO UPDATE
                         SET magnitude = EXCLUDED.magnitude, place = EXCLUDED.place
                     """,
@@ -378,6 +380,7 @@ def history_stats(connection) -> dict:
         "chunks": int(chunks[0]) if chunks else None,
         "compressedChunks": int(chunks[1]) if chunks else None,
         "compressionRatio": ratio,
+        "live": live_status(connection),
     }
 
 
@@ -412,6 +415,132 @@ def history_buckets(
         for month, station, picks, mean in rows
     ]
     return busiest, names, buckets, stats, source
+
+
+# ---------------------------------------------------------------- live ingest
+
+# Quakes added by the live USGS ingest carry ingested_at; seeded ones leave it NULL.
+LIVE_SCHEMA = (
+    "ALTER TABLE quaketrace.events ADD COLUMN IF NOT EXISTS ingested_at timestamptz",
+    """
+    CREATE TABLE IF NOT EXISTS quaketrace.ingest_runs (
+        run_at timestamptz NOT NULL DEFAULT now(),
+        window_start timestamptz NOT NULL,
+        window_end timestamptz NOT NULL,
+        checked integer NOT NULL DEFAULT 0,
+        new_events integer NOT NULL DEFAULT 0,
+        new_picks integer NOT NULL DEFAULT 0,
+        error text
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ingest_runs_time ON quaketrace.ingest_runs (run_at DESC)",
+)
+
+LIVE_STATUS = """
+    SELECT (SELECT max(run_at) FROM quaketrace.ingest_runs),
+           (SELECT max(run_at) FROM quaketrace.ingest_runs WHERE error IS NULL),
+           (SELECT error FROM quaketrace.ingest_runs ORDER BY run_at DESC LIMIT 1),
+           (SELECT count(*) FROM quaketrace.events WHERE ingested_at IS NOT NULL),
+           (SELECT coalesce(sum(new_picks), 0) FROM quaketrace.ingest_runs),
+           (SELECT max(event_time) FROM quaketrace.events)
+"""
+
+LATEST_LIVE_EVENT = """
+    SELECT event_id, event_time, magnitude, place FROM quaketrace.events
+    WHERE ingested_at IS NOT NULL ORDER BY event_time DESC LIMIT 1
+"""
+
+
+@contextmanager
+def session(dsn: str, operation: str):
+    """An autocommit connection whose database errors surface as TigerDataError."""
+    with _autocommit(dsn, operation) as connection:
+        try:
+            yield connection
+        except psycopg.Error as error:
+            raise TigerDataError(f"{operation} failed ({type(error).__name__}).") from None
+
+
+def ensure_live_schema(connection) -> None:
+    for statement in LIVE_SCHEMA:
+        connection.execute(statement)
+
+
+def latest_event_time(connection) -> datetime | None:
+    row = connection.execute("SELECT max(event_time) FROM quaketrace.events").fetchone()
+    return row[0].astimezone(timezone.utc) if row and row[0] else None
+
+
+def known_event_ids(connection, event_ids: list[str]) -> set[str]:
+    if not event_ids:
+        return set()
+    rows = connection.execute(
+        "SELECT event_id FROM quaketrace.events WHERE event_id = ANY(%s)", (event_ids,)
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+def store_live(connection, added, *, window_start: datetime, window_end: datetime, checked: int,
+               error: str | None = None) -> tuple[int, int]:
+    """Insert newly published quakes and their picks, and log the run. Returns (events, picks) added."""
+    new_events = new_picks = 0
+    with connection.transaction():
+        with connection.cursor() as cursor:
+            for event, picks in added:
+                cursor.execute(
+                    """
+                    INSERT INTO quaketrace.events
+                        (event_id, event_time, latitude, longitude, depth_km, magnitude, place, ingested_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (event_id) DO NOTHING
+                    """,
+                    astuple(event),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                new_events += 1
+                cursor.executemany(
+                    """
+                    INSERT INTO quaketrace.picks VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    [astuple(pick) for pick in picks],
+                )
+                new_picks += max(cursor.rowcount, 0)
+        connection.execute(
+            """
+            INSERT INTO quaketrace.ingest_runs (window_start, window_end, checked, new_events, new_picks, error)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (window_start, window_end, checked, new_events, new_picks, error),
+        )
+    return new_events, new_picks
+
+
+def _iso(moment) -> str | None:
+    return moment.astimezone(timezone.utc).isoformat() if moment else None
+
+
+def live_status(connection) -> dict | None:
+    """When the live ingest last ran and what it has added; None before its first run."""
+    row = _first_row(connection, (LIVE_STATUS,))
+    if not row or row[0] is None:
+        return None
+    last_run, last_ok, error, events, picks, newest = row
+    latest = _first_row(connection, (LATEST_LIVE_EVENT,))
+    return {
+        "lastRun": _iso(last_run), "lastSuccess": _iso(last_ok), "error": error,
+        "eventsAdded": int(events), "picksAdded": int(picks), "newestQuake": _iso(newest),
+        "latestAdded": {
+            "id": latest[0], "time": _iso(latest[1]),
+            "magnitude": float(latest[2]) if latest[2] is not None else None, "place": latest[3],
+        } if latest else None,
+    }
+
+
+def invalidate_overview() -> None:
+    """Drop cached totals so the next history query shows freshly ingested rows."""
+    _overview_cache.clear()
 
 
 # ---------------------------------------------------------------- shared connection

@@ -1,5 +1,5 @@
-// Map views for QuakeTrace: Google Maps (map + satellite), Google 3D Earth, and an
-// offline SVG fallback drawn from the bundled state outlines.
+// Map views for QuakeTrace: MapLibre GL (street map, satellite, 3D globe with terrain),
+// all free and keyless, plus an offline SVG fallback drawn from the bundled state outlines.
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const W = 800;
@@ -7,45 +7,76 @@ const KM_PER_DEG = 111.195;
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// ---------------------------------------------------------------- Google loader
+// ---------------------------------------------------------------- MapLibre loader
 
-let googlePromise = null;
-let googleFailed = false;
+const MAPLIBRE = "https://unpkg.com/maplibre-gl@5.6.0/dist";
+const STREET_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
+const TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+
+let libPromise = null;
+let libFailed = false;
 const failureListeners = new Set();
 
-export function googleMapsFailed() { return googleFailed; }
-export function onGoogleFailure(listener) { failureListeners.add(listener); return () => failureListeners.delete(listener); }
+export function mapsFailed() { return libFailed || (typeof navigator !== "undefined" && navigator.onLine === false); }
+export function onMapsFailure(listener) { failureListeners.add(listener); return () => failureListeners.delete(listener); }
 
-function failGoogle(reason) {
-  if (googleFailed) return;
-  googleFailed = true;
-  console.warn("Google Maps unavailable:", reason);
+function failMaps(reason) {
+  if (libFailed) return;
+  libFailed = true;
+  console.warn("Online maps unavailable:", reason);
   failureListeners.forEach((listener) => listener(reason));
 }
 
-// Google calls this global when the key is rejected (bad key, referrer, or billing).
-window.gm_authFailure = () => failGoogle("The Google Maps API key was rejected.");
-
-export function loadGoogleMaps(key) {
-  if (!key) return Promise.reject(new Error("No Google Maps API key."));
-  if (googleFailed) return Promise.reject(new Error("Google Maps failed to load."));
-  if (googlePromise) return googlePromise;
-  googlePromise = new Promise((resolve, reject) => {
-    const callback = "__quaketraceMapsReady";
-    window[callback] = () => { delete window[callback]; resolve(window.google.maps); };
-    const params = new URLSearchParams({ key, v: "beta", loading: "async", callback, libraries: "maps,marker" });
+export function loadMapLibre() {
+  if (window.maplibregl) return Promise.resolve(window.maplibregl);
+  if (libFailed) return Promise.reject(new Error("The online map library failed to load."));
+  if (libPromise) return libPromise;
+  libPromise = new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = `${MAPLIBRE}/maplibre-gl.css`;
+    document.head.append(css);
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?${params}`;
+    script.src = `${MAPLIBRE}/maplibre-gl.js`;
     script.async = true;
-    script.onerror = () => { failGoogle("The Google Maps script could not load."); reject(new Error("Google Maps script failed.")); };
+    script.onload = () => resolve(window.maplibregl);
+    script.onerror = () => { failMaps("The map library could not load (offline?)."); reject(new Error("MapLibre script failed.")); };
     document.head.append(script);
-    setTimeout(() => { if (!window.google?.maps?.importLibrary) { failGoogle("Timed out loading Google Maps."); reject(new Error("Timeout")); } }, 15000);
+    setTimeout(() => { if (!window.maplibregl) { failMaps("Timed out loading the map library."); reject(new Error("Timeout")); } }, 12000);
   });
-  return googlePromise;
+  return libPromise;
 }
 
 export function googleEarthUrl(lat, lon, rangeM = 160000) {
   return `https://earth.google.com/web/@${lat.toFixed(5)},${lon.toFixed(5)},0a,${Math.round(rangeM)}d,35y,0h,45t,0r`;
+}
+
+function imageryStyle(dim) {
+  return {
+    version: 8,
+    sources: {
+      imagery: {
+        type: "raster", tileSize: 256, maxzoom: 19,
+        tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`],
+        attribution: "Imagery © Esri, Maxar, Earthstar Geographics",
+      },
+      places: {
+        type: "raster", tileSize: 256, maxzoom: 19,
+        tiles: [`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`],
+      },
+    },
+    layers: [
+      { id: "paper", type: "background", paint: { "background-color": "#FFFFFF" } },
+      { id: "imagery", type: "raster", source: "imagery", paint: { "raster-opacity": 1 - dim / 100 } },
+      { id: "places", type: "raster", source: "places" },
+    ],
+  };
+}
+
+function bearingDeg(a, b) {
+  const lat0 = ((a.lat + b.lat) / 2) * Math.PI / 180;
+  return Math.atan2((b.lon - a.lon) * Math.cos(lat0), b.lat - a.lat) * 180 / Math.PI;
 }
 
 // ---------------------------------------------------------------- shared geometry
@@ -294,7 +325,7 @@ class SvgMap {
   destroy() {}
 }
 
-// ---------------------------------------------------------------- Google 2D
+// ---------------------------------------------------------------- MapLibre (map, satellite, earth)
 
 function el(className, text) {
   const node = document.createElement("div");
@@ -303,200 +334,150 @@ function el(className, text) {
   return node;
 }
 
-class GoogleMap2D {
-  constructor(host, config, { satellite = false, dim = 0 } = {}) {
+class LibreMap {
+  constructor(host, { kind = "map", dim = 0, small = false } = {}) {
     this.host = host;
-    this.config = config;
-    this.satellite = satellite;
+    this.kind = kind;
     this.dim = dim;
-    this.overlays = [];
-    this.kind = "google";
+    this.small = small;
+    this.markers = [];
+    this.layers = [];
+    this.sources = [];
   }
 
   async init() {
-    const maps = await loadGoogleMaps(this.config.googleMapsKey);
-    const { Map, GroundOverlay, Polyline, Rectangle } = await maps.importLibrary("maps");
-    const { AdvancedMarkerElement } = await maps.importLibrary("marker");
-    Object.assign(this, { Map, GroundOverlay, Polyline, Rectangle, AdvancedMarkerElement, maps });
-    this.map = new Map(this.host, {
-      center: { lat: 40.8, lng: -74.6 }, zoom: 8,
-      mapId: this.config.googleMapId || "DEMO_MAP_ID",
-      mapTypeId: this.satellite ? "hybrid" : "roadmap",
-      disableDefaultUI: true, zoomControl: true, fullscreenControl: true,
-      gestureHandling: "cooperative", clickableIcons: false, tilt: 0,
+    const lib = await loadMapLibre();
+    this.lib = lib;
+    const earth = this.kind === "earth";
+    const map = new lib.Map({
+      container: this.host,
+      style: this.kind === "map" ? STREET_STYLE : imageryStyle(this.dim),
+      center: [-74.6, 40.8], zoom: 7,
+      pitch: earth ? 52 : 0, bearing: earth ? 8 : 0, maxPitch: 75,
+      attributionControl: { compact: true },
+      cooperativeGestures: true,
+      dragRotate: earth, pitchWithRotate: earth, touchPitch: earth,
     });
+    this.map = map;
+    map.addControl(new lib.NavigationControl({ showCompass: earth, visualizePitch: earth }), "top-left");
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("The map tiles took too long to load.")), 12000);
+      map.once("load", () => { clearTimeout(timer); resolve(); });
+      map.once("error", (event) => { if (!map.loaded()) { clearTimeout(timer); reject(new Error(event?.error?.message || "The map style failed to load.")); } });
+    });
+    if (earth) {
+      try { map.setProjection({ type: "globe" }); } catch { /* older builds */ }
+      map.addSource("dem", { type: "raster-dem", tiles: [TERRAIN_TILES], encoding: "terrarium", tileSize: 256, maxzoom: 14, attribution: "Terrain: Mapzen, AWS Open Data" });
+      map.setTerrain({ source: "dem", exaggeration: 1.6 });
+      try { map.setSky({ "sky-color": "#9CC7F0", "horizon-color": "#E8F0FE", "sky-horizon-blend": 0.6 }); } catch { /* optional */ }
+    }
+  }
+
+  setDim(dim) {
+    this.dim = dim;
+    if (this.map && this.kind !== "map" && this.map.getLayer("imagery")) this.map.setPaintProperty("imagery", "raster-opacity", 1 - dim / 100);
   }
 
   clear() {
-    this.overlays.forEach((o) => { if ("map" in o) o.map = null; if (o.setMap) o.setMap(null); });
-    this.overlays = [];
+    this.markers.forEach((m) => m.remove());
+    this.markers = [];
+    if (!this.map) return;
+    this.layers.forEach((id) => { if (this.map.getLayer(id)) this.map.removeLayer(id); });
+    this.sources.forEach((id) => { if (this.map.getSource(id)) this.map.removeSource(id); });
+    this.layers = [];
+    this.sources = [];
   }
 
-  marker(position, content, title, zIndex = 1) {
-    const m = new this.AdvancedMarkerElement({ map: this.map, position, content, title: title || "", zIndex });
-    this.overlays.push(m);
+  marker(lat, lon, content, title, { anchor = "bottom", rotation = 0, rotate = false } = {}) {
+    // MapLibre owns the outer element's transform, so the styled node goes inside a wrapper.
+    const wrap = document.createElement("div");
+    wrap.className = "ml-marker";
+    if (title) wrap.title = title;
+    wrap.append(content);
+    const m = new this.lib.Marker({ element: wrap, anchor, rotation, rotationAlignment: rotate ? "map" : "viewport" })
+      .setLngLat([lon, lat]).addTo(this.map);
+    this.markers.push(m);
     return m;
+  }
+
+  addLayer(layer, source) {
+    this.map.addSource(layer.id, source);
+    this.sources.push(layer.id);
+    this.map.addLayer({ ...layer, source: layer.id });
+    this.layers.push(layer.id);
   }
 
   render(scene) {
     if (!this.map) return;
     this.clear();
-    const ll = (lat, lon) => ({ lat, lng: lon });
-    if (this.satellite && this.dim > 0) {
-      const dimmer = new this.Rectangle({
-        map: this.map, bounds: { south: 30, north: 50, west: -90, east: -60 },
-        fillColor: "#FFFFFF", fillOpacity: this.dim / 100, strokeWeight: 0, clickable: false, zIndex: 0,
-      });
-      this.overlays.push(dimmer);
-    }
+    const earth = this.kind === "earth";
     if (scene.zone) {
-      const zone = new this.GroundOverlay(zoneImage(scene.zone), scene.zone.bounds, { clickable: false });
-      zone.setMap(this.map);
-      this.overlays.push(zone);
+      const { south, north, west, east } = scene.zone.bounds;
+      this.addLayer(
+        { id: "qt-zone", type: "raster", paint: { "raster-fade-duration": 0, "raster-opacity": 1 } },
+        { type: "image", url: zoneImage(scene.zone), coordinates: [[west, north], [east, north], [east, south], [west, south]] },
+      );
+    }
+    const line = (a, b, props) => ({ type: "Feature", properties: props, geometry: { type: "LineString", coordinates: [[a.lon, a.lat], [b.lon, b.lat]] } });
+    const solid = [];
+    const dashed = [];
+    // In 3D, station-to-estimate rays show the geometry the fit uses.
+    const focus = (scene.marks || []).find((m) => m.kind === "ring") || (scene.marks || [])[0];
+    if (earth && focus) {
+      for (const s of scene.stations || []) {
+        const color = s.tone === "suspect" ? "#E8590C" : s.tone === "out" ? "#9AA4B2" : "#FFFFFF";
+        solid.push(line(s, focus, { color, width: s.tone === "suspect" ? 4 : 2, opacity: s.tone === "suspect" ? 0.9 : 0.6 }));
+      }
     }
     for (const link of scene.links || []) {
       const color = link.color || "#8A94A3";
-      const icons = [];
-      if (link.dashed) icons.push({ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, strokeColor: color, scale: 2 }, offset: "0", repeat: "9px" });
-      if (link.arrow) icons.push({ icon: { path: this.maps.SymbolPath.FORWARD_OPEN_ARROW, scale: 3, strokeColor: color, strokeOpacity: 1 }, offset: "100%" });
-      const line = new this.Polyline({
-        map: this.map, path: [ll(link.a.lat, link.a.lon), ll(link.b.lat, link.b.lon)],
-        strokeColor: color, strokeOpacity: link.dashed ? 0 : 0.95, strokeWeight: link.width || 2.5, icons, clickable: false, zIndex: 2,
-      });
-      this.overlays.push(line);
+      (link.dashed ? dashed : solid).push(line(link.a, link.b, { color, width: link.width || 2.5, opacity: 0.95 }));
+      if (link.arrow) {
+        const head = el("ml-arrow", "▲");
+        head.style.color = color;
+        this.marker(link.b.lat, link.b.lon, head, "", { anchor: "center", rotation: bearingDeg(link.a, link.b), rotate: true });
+      }
       if (link.label) {
         const tag = el("gm-km", link.label);
         tag.style.color = link.labelColor || color;
-        this.marker(ll((link.a.lat + link.b.lat) / 2, (link.a.lon + link.b.lon) / 2), tag, link.label, 3);
+        this.marker((link.a.lat + link.b.lat) / 2, (link.a.lon + link.b.lon) / 2, tag, link.label);
       }
     }
+    const paint = { "line-color": ["get", "color"], "line-width": ["get", "width"], "line-opacity": ["get", "opacity"] };
+    if (solid.length) this.addLayer({ id: "qt-lines", type: "line", layout: { "line-cap": "round" }, paint }, { type: "geojson", data: { type: "FeatureCollection", features: solid } });
+    if (dashed.length) this.addLayer({ id: "qt-dashed", type: "line", paint: { ...paint, "line-dasharray": [1.5, 1.5] } }, { type: "geojson", data: { type: "FeatureCollection", features: dashed } });
+
     for (const s of scene.stations || []) {
       const wrap = el("gm-station");
       wrap.append(el(`gm-tri ${s.tone || ""}`), el(`gm-label ${s.tone === "suspect" ? "suspect" : ""}`, s.short));
-      this.marker(ll(s.lat, s.lon), wrap, `${s.id} · ${s.name || ""}`, 4);
+      this.marker(s.lat, s.lon, wrap, `${s.id} · ${s.name || ""}`);
     }
     if (scene.outCircle) {
       const ring = el("gm-out");
       const tag = el("gm-label suspect", scene.outCircle.label);
       tag.style.cssText = "left:52px;top:10px;font-size:18px";
       ring.append(tag);
-      this.marker(ll(scene.outCircle.lat, scene.outCircle.lon), ring, scene.outCircle.label, 5);
+      this.marker(scene.outCircle.lat, scene.outCircle.lon, ring, scene.outCircle.label);
     }
     for (const m of scene.marks || []) {
-      let node;
-      if (m.kind === "star") {
-        node = el("gm-star", "★");
-      } else {
-        node = el(`gm-ring ${m.kind === "ring-dashed" ? "dashed" : ""} ${m.kind === "ring-gray" ? "gray dashed" : ""}`);
-      }
+      const node = m.kind === "star"
+        ? el("gm-star", "★")
+        : el(`gm-ring ${m.kind === "ring-dashed" ? "dashed" : ""} ${m.kind === "ring-gray" ? "gray dashed" : ""}`);
       if (m.label) {
         const tag = el(`gm-tag ${m.kind === "ring-gray" ? "gray" : ""}`, m.label);
         if (m.kind === "star") tag.style.cssText = "left:22px;top:0;color:#14181F;font-size:12px;font-weight:500";
         node.append(tag);
       }
-      this.marker(ll(m.lat, m.lon), node, m.label, 6);
+      this.marker(m.lat, m.lon, node, m.label);
     }
     const b = boundsOf(scenePoints(scene));
-    this.map.fitBounds(b, 56);
-  }
-
-  destroy() { this.clear(); }
-}
-
-// ---------------------------------------------------------------- Google 3D Earth
-
-class GoogleEarth3D {
-  constructor(host, config) {
-    this.host = host;
-    this.config = config;
-    this.kind = "earth";
-  }
-
-  async init() {
-    const maps = await loadGoogleMaps(this.config.googleMapsKey);
-    const lib = await maps.importLibrary("maps3d");
-    if (!lib?.Map3DElement) throw new Error("The 3D Maps library is not available for this key.");
-    this.lib = lib;
-    try { this.PinElement = (await maps.importLibrary("marker")).PinElement; } catch { /* optional */ }
-  }
-
-  setPath(element, points) {
-    try { element.path = points; } catch { /* older builds */ }
-    if (!element.path || !element.path.length) {
-      try { element.coordinates = points; } catch { /* ignore */ }
-    }
-  }
-
-  pin(marker, background, glyph) {
-    if (!this.PinElement) return;
-    try {
-      const pin = new this.PinElement({ background, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyph: glyph || "", scale: 1 });
-      marker.append(pin);
-    } catch { /* some builds do not accept pins on 3D markers */ }
-  }
-
-  render(scene) {
-    const { Map3DElement, Marker3DElement, Polyline3DElement, Polygon3DElement } = this.lib;
-    const b = boundsOf(scenePoints(scene));
-    const centre = centreOf(b);
-    const range = Math.max(60000, spanKm(b) * 1000 * 1.25);
-    this.range = range;
-    this.host.innerHTML = "";
-    const map = new Map3DElement({
-      center: { ...centre, altitude: 0 }, range, tilt: 52, heading: 8, mode: "HYBRID",
+    this.map.fitBounds([[b.west, b.south], [b.east, b.north]], {
+      padding: this.small ? 32 : 56, duration: 0, maxZoom: 13,
+      ...(earth ? { pitch: 52, bearing: 8 } : {}),
     });
-    this.map = map;
-    this.host.append(map);
-    const add = (child) => { try { map.append(child); } catch (error) { console.warn(error); } };
-
-    if (scene.zone?.hull?.length > 2 && Polygon3DElement) {
-      const polygon = new Polygon3DElement({
-        fillColor: "rgba(43, 191, 154, 0.45)", strokeColor: "#0B8A6C", strokeWidth: 3,
-        altitudeMode: "CLAMP_TO_GROUND", drawsOccludedSegments: true,
-      });
-      const ring = scene.zone.hull.map(([lat, lng]) => ({ lat, lng }));
-      try { polygon.path = ring; } catch { /* older builds */ }
-      if (!polygon.path || !polygon.path.length) { try { polygon.outerCoordinates = ring; } catch { /* ignore */ } }
-      add(polygon);
-    }
-
-    // Station-to-estimate rays read well in 3D and show the geometry the fit uses.
-    const focus = (scene.marks || []).find((m) => m.kind === "ring") || (scene.marks || [])[0];
-    for (const s of scene.stations || []) {
-      if (focus && Polyline3DElement) {
-        const ray = new Polyline3DElement({
-          strokeColor: s.tone === "suspect" ? "rgba(232, 89, 12, 0.9)" : s.tone === "out" ? "rgba(154, 164, 178, 0.6)" : "rgba(255, 255, 255, 0.55)",
-          strokeWidth: s.tone === "suspect" ? 4 : 2, altitudeMode: "CLAMP_TO_GROUND", drawsOccludedSegments: true,
-        });
-        this.setPath(ray, [{ lat: s.lat, lng: s.lon }, { lat: focus.lat, lng: focus.lon }]);
-        add(ray);
-      }
-      const marker = new Marker3DElement({
-        position: { lat: s.lat, lng: s.lon, altitude: 1200 }, altitudeMode: "RELATIVE_TO_GROUND", extruded: true,
-        label: s.short,
-      });
-      this.pin(marker, s.tone === "suspect" ? "#E8590C" : s.tone === "out" ? "#9AA4B2" : "#4A5563");
-      add(marker);
-    }
-    for (const link of scene.links || []) {
-      if (!Polyline3DElement) break;
-      const line = new Polyline3DElement({
-        strokeColor: link.color || "#FFFFFF", strokeWidth: 5, altitudeMode: "CLAMP_TO_GROUND", drawsOccludedSegments: true,
-      });
-      this.setPath(line, [{ lat: link.a.lat, lng: link.a.lon }, { lat: link.b.lat, lng: link.b.lon }]);
-      add(line);
-    }
-    for (const m of scene.marks || []) {
-      const marker = new Marker3DElement({
-        position: { lat: m.lat, lng: m.lon, altitude: m.kind === "star" ? 4000 : 2500 }, altitudeMode: "RELATIVE_TO_GROUND", extruded: true,
-        label: m.label || (m.kind === "star" ? "USGS" : ""),
-      });
-      this.pin(marker, m.kind === "star" ? "#14181F" : m.kind === "ring-gray" ? "#8A94A3" : "#1F6FEB", m.kind === "star" ? "★" : "");
-      add(marker);
-    }
   }
 
-  destroy() { this.host.innerHTML = ""; }
+  destroy() { this.clear(); this.map?.remove(); this.map = null; }
 }
 
 // ---------------------------------------------------------------- Map view widget
@@ -505,16 +486,16 @@ const BASEMAPS = [["map", "Map"], ["satellite", "Satellite"], ["earth", "Earth 3
 
 /**
  * Build a map card inside `container`.
- * options: { overview, config, basemap, dim, small, onBasemap(kind) }
+ * options: { overview, basemap, dim, small, onBasemap(kind) }
  */
 export function createMapView(container, options) {
-  const { overview, config, small = false } = options;
-  const hasGoogle = Boolean(config.googleMapsKey) && !googleMapsFailed();
-  const basemap = hasGoogle ? options.basemap || "map" : "map";
+  const { overview, small = false } = options;
+  const online = !mapsFailed();
+  const basemap = online ? options.basemap || "map" : "svg";
   container.innerHTML = `
     <div class="map-frame ${small ? "small" : ""}">
       <div class="map-host"></div>
-      ${small || !hasGoogle ? "" : `<div class="basemap" role="group" aria-label="Basemap">${BASEMAPS.map(([key, label]) => `<button type="button" data-basemap="${key}" aria-pressed="${key === basemap}" ${!hasGoogle && key !== "map" ? 'disabled title="Connect Google Maps in About to enable"' : ""}>${label}</button>`).join("")}</div>`}
+      ${small ? "" : `<div class="basemap" role="group" aria-label="Basemap">${BASEMAPS.map(([key, label]) => `<button type="button" data-basemap="${key}" aria-pressed="${key === basemap}" ${online ? "" : 'disabled title="Needs internet"'}>${label}</button>`).join("")}</div>`}
       <div class="map-note" hidden></div>
       <a class="earth-link" target="_blank" rel="noopener" hidden>Open in Google Earth ↗</a>
     </div>`;
@@ -532,18 +513,18 @@ export function createMapView(container, options) {
     host.innerHTML = "";
     showNote("");
     const size = small ? { width: 420, height: 315 } : { width: 800, height: 560 };
-    if (kind !== "svg" && hasGoogle && !googleMapsFailed()) {
+    if (kind !== "svg" && !mapsFailed()) {
       try {
-        provider = kind === "earth"
-          ? new GoogleEarth3D(host, config)
-          : new GoogleMap2D(host, config, { satellite: kind === "satellite", dim: options.dim || 0 });
+        provider = new LibreMap(host, { kind, dim: options.dim || 0, small });
         await provider.init();
-        if (disposed) return;
+        if (disposed) { provider.destroy(); return; }
         if (scene) provider.render(scene);
-        if (kind === "earth") showNote('Photorealistic 3D needs the <strong>Map Tiles API</strong> on your key. Drag to orbit, scroll to zoom.');
+        if (kind === "earth") showNote("Drag to pan, right-drag or Ctrl-drag to orbit, scroll to zoom.");
         return;
       } catch (error) {
         console.warn(error);
+        provider?.destroy();
+        host.innerHTML = "";
         showNote(`${esc(error.message)} Showing the offline map.`);
       }
     }
@@ -564,16 +545,16 @@ export function createMapView(container, options) {
     }
   });
 
-  const unsubscribe = onGoogleFailure((reason) => {
+  const unsubscribe = onMapsFailure((reason) => {
     if (disposed) return;
     showNote(`${esc(reason)} Showing the offline map.`);
-    container.querySelectorAll("[data-basemap]").forEach((b) => { b.disabled = b.dataset.basemap !== "map"; b.setAttribute("aria-pressed", String(b.dataset.basemap === "map")); });
+    container.querySelectorAll("[data-basemap]").forEach((b) => { b.disabled = true; b.title = "Needs internet"; b.setAttribute("aria-pressed", "false"); });
     provider?.destroy();
     provider = new SvgMap(host, overview, small ? { width: 420, height: 315 } : {});
     if (scene) provider.render(scene);
   });
 
-  const ready = build(hasGoogle ? basemap : "svg");
+  const ready = build(basemap);
 
   return {
     async setScene(next) {
@@ -588,12 +569,13 @@ export function createMapView(container, options) {
       }
     },
     async toPNG() {
-      // Google tiles cannot be exported; always export the offline rendering of the same scene.
+      // Online tiles are cross-origin; always export the offline rendering of the same scene.
       const tmp = document.createElement("div");
       const svgMap = new SvgMap(tmp, overview);
       svgMap.render(scene);
       return svgMap.toPNG();
     },
+    setDim(dim) { options.dim = dim; provider?.setDim?.(dim); },
     destroy() { disposed = true; unsubscribe(); provider?.destroy(); },
   };
 }

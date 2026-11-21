@@ -26,7 +26,6 @@ const STEPS = [["quake", "Real quake"], ["tamper", "Tamper"], ["damage", "Damage
 
 const state = {
   overview: null,
-  config: { googleMapsKey: "", googleMapId: "DEMO_MAP_ID" },
   wave: null,
   basemap: store.get("qt.basemap", "map"),
   dim: 30,
@@ -72,7 +71,7 @@ function mountMap(selector, scene, { small = false } = {}) {
   const container = $(selector);
   if (!container) return null;
   const view = createMapView(container, {
-    overview: state.overview, config: state.config, basemap: state.basemap, dim: state.dim, small,
+    overview: state.overview, basemap: state.basemap, dim: state.dim, small,
     onBasemap(kind) { state.basemap = kind; store.set("qt.basemap", kind); const opts = $("#basemap-opts"); if (opts) opts.hidden = kind !== "satellite"; },
   });
   view.setScene(scene);
@@ -270,10 +269,10 @@ function renderDamage() {
         <div><div class="c-muted">Grid</div><div class="v">${res.gridKm} km cells</div></div>
         <p class="note" style="grid-column:span 3;margin:0">Zone = cells within ${res.tampered.zone.marginS} s RMS of the best fit · length ${res.clean.zone.lengthKm} → ${res.tampered.zone.lengthKm} km</p></div>` },
       { title: "Basemap options", id: "basemap-opts-wrap", body: `<div class="det-body kv" style="grid-template-columns:auto 1fr">
-        <span><strong>Map</strong> · Google Maps roadmap</span><span>Needs a Google Maps key and internet</span>
-        <span><strong>Satellite</strong> · Google satellite imagery</span><span>Needs a Google Maps key and internet</span>
-        <span><strong>Earth 3D</strong> · Google photorealistic 3D tiles</span><span>Also needs the Map Tiles API</span>
-        <span><strong>Fallback</strong> · bundled state outlines</span><span>Used offline or if Google fails</span>
+        <span><strong>Map</strong> · OpenStreetMap via OpenFreeMap</span><span>Free, no key, needs internet</span>
+        <span><strong>Satellite</strong> · Esri World Imagery</span><span>Free, no key, needs internet</span>
+        <span><strong>Earth 3D</strong> · Globe with AWS open terrain</span><span>Free, no key, needs internet</span>
+        <span><strong>Fallback</strong> · bundled state outlines</span><span>Used offline or if tiles fail</span>
         <label for="dim" id="basemap-opts" ${state.basemap === "satellite" ? "" : "hidden"} style="display:contents"><span>Dim imagery</span><input id="dim" type="range" min="0" max="80" value="${state.dim}"></label>
         </div>` },
     ])}
@@ -556,7 +555,7 @@ function historyCardHtml() {
       <div class="history-stats" id="history-stats"><span class="c-muted">Loading history…</span></div>
       <form class="history-controls" id="history-form">
         <div class="field"><label for="h-st">Break a clock in history</label><select id="h-st" class="select small mono"></select></div>
-        <div class="field"><label for="h-on">Starting</label><input id="h-on" class="select small" type="date" value="${esc(h.onset)}" min="2018-01-01" max="2025-12-31"></div>
+        <div class="field"><label for="h-on">Starting</label><input id="h-on" class="select small" type="date" value="${esc(h.onset)}" min="2018-01-01" max="${new Date().toISOString().slice(0, 10)}"></div>
         <div class="field"><div class="range-head"><label for="h-off">Shift</label><span class="mono c-orange" id="h-off-value">${sign(h.offset)} s</span></div><input id="h-off" type="range" min="-5" max="5" step="0.5" value="${h.offset}"></div>
         <div style="display:flex;gap:8px;align-items:end"><button class="btn-primary" type="submit" style="height:40px;font-size:14px">Run on Tiger</button><button class="btn-plain" type="button" data-action="history-clear" style="height:40px">Clear</button></div>
       </form>
@@ -592,6 +591,19 @@ async function mountHistory() {
   }
 }
 
+function timeAgo(iso) {
+  if (!iso) return "never";
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
+}
+
+function dayLabel(iso) {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
 function fillHistory() {
   const h = state.history;
   const view = h.view;
@@ -602,14 +614,21 @@ function fillHistory() {
   }
   const s = view.stats;
   const tiger = view.source === "tiger";
+  const live = tiger ? s.live : null;
+  const liveNote = live
+    ? `<span class="note" style="display:block;margin-top:2px">${live.error && live.lastRun !== live.lastSuccess
+      ? `USGS feed unreachable, last good check ${timeAgo(live.lastSuccess)}`
+      : `USGS feed checked ${timeAgo(live.lastRun)}`}</span>`
+    : "";
   $("#history-source").innerHTML = tiger
-    ? `<span class="status"><span class="dot"></span>Live from Tiger Data</span>`
+    ? `<span class="status"><span class="dot"></span>Live from Tiger Data</span>${liveNote}`
     : `<span class="status"><span class="dot busy"></span>Bundled copy</span><span class="note" style="display:block;margin-top:2px">Set QUAKETRACE_TIGER_DSN to query Tiger live</span>`;
   const chips = [
     `<b>${s.picks.toLocaleString()}</b> P-wave picks`,
     `<b>${s.events.toLocaleString()}</b> quakes`,
     `<b>${s.stations.toLocaleString()}</b> stations`,
     `${monthLabel(s.first)} – ${monthLabel(s.last)}`,
+    live ? `<b>+${live.eventsAdded.toLocaleString()}</b> quakes streamed in live${live.latestAdded ? ` · newest ${live.latestAdded.magnitude !== null ? `M${live.latestAdded.magnitude.toFixed(1)} ` : ""}${dayLabel(live.latestAdded.time)}` : ""}` : null,
     tiger && s.chunks ? `hypertable: <b>${s.chunks}</b> chunks, ${s.compressedChunks} compressed${s.compressionRatio ? ` (${s.compressionRatio}× smaller)` : ""}` : null,
     `${esc(view.query)} · <b>${view.elapsedMs} ms</b>`,
   ].filter(Boolean);
@@ -1190,6 +1209,7 @@ document.addEventListener("input", (event) => {
     $("#a3-value").textContent = `${sign(state.audit.offset)} s`;
   } else if (event.target.id === "dim") {
     state.dim = Number(event.target.value);
+    state.maps.forEach((m) => m.setDim?.(state.dim));
   } else if (event.target.id === "h-off") {
     $("#h-off-value").textContent = `${sign(Number(event.target.value))} s`;
   } else if (event.target.id === "ex-sh") {
@@ -1257,7 +1277,7 @@ document.addEventListener("submit", async (event) => {
   try { await runAudit(); renderAudit(); } catch (error) { errorView(error); }
 });
 
-// ---------------------------------------------------------------- About / Google Maps key
+// ---------------------------------------------------------------- About
 
 function setupAbout() {
   $("#about-open").addEventListener("click", () => $("#about").showModal());
@@ -1276,14 +1296,8 @@ async function route() {
 async function boot() {
   setupAbout();
   try {
-    const [overview, config] = await Promise.all([getJSON("/api/overview"), getJSON("/api/config")]);
+    const overview = await getJSON("/api/overview");
     state.overview = overview;
-    state.config = {
-      googleMapId: config.googleMapId,
-      serverKey: Boolean(config.googleMapsKey),
-      // Google Maps only when the server is given GOOGLE_MAPS_API_KEY (for example in .env).
-      googleMapsKey: config.googleMapsKey,
-    };
     state.replay.event = overview.mainshock;
     state.wave = await getJSON("/api/waveform").catch(() => null);
     setStatus("", overview.arrivalSource === "tiger" ? "Ready · Tiger Data" : "Ready");
