@@ -1,0 +1,15 @@
+# Never upload local secrets or environments.
+.env
+.env.*
+*.env
+!.env.example
+.venv/
+.claude/
+__pycache__/
+*.py[cod]
+
+# Not needed at runtime.
+tests/
+scripts/
+fixtures/raw/
+.github/

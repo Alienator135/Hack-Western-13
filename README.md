@@ -112,9 +112,15 @@ The continuous aggregate is real-time, so new picks appear in **Every station's 
 
 Each check also rechecks a window before Tiger's newest quake (30 days north-east, 7 days world), because USGS often publishes phase data after a quake. Quakes are saved in batches of 40, newest first, so a long backfill keeps its progress. Runs are logged in `quaketrace.ingest_runs`.
 
-**Optional: a year of worldwide history.** Run this once per Tiger service. It downloads about 7,800 quakes (roughly 600,000 picks) from USGS and takes about 3 hours because USGS rate-limits downloads. It saves the newest quakes first, so you can stop it at any time; rerun it to continue and to retry any quakes it skipped.
+**Optional: worldwide history.** Run this once per Tiger service. It saves the newest quakes first, so you can stop it at any time; rerun it to continue and to retry any quakes it skipped. USGS rate-limits downloads, so pick the size to fit your time and storage:
+
+| Backfill | Quakes | Picks | Time |
+|---|---|---|---|
+| M5.5+ since 2018 (fits a free trial) | about 3,700 | about 600,000 | about 1 hour |
+| M4.5+, one year | about 7,800 | about 600,000 | about 3 hours |
 
 ```sh
+.venv/bin/python scripts/tiger_data.py ingest --feed world --backfill-days 3247 --min-magnitude 5.5
 .venv/bin/python scripts/tiger_data.py ingest --feed world --backfill-days 365
 ```
 
@@ -127,6 +133,18 @@ Each check also rechecks a window before Tiger's newest quake (30 days north-eas
 | Turn it off | `.venv/bin/python server.py --ingest-minutes 0` |
 
 If USGS is unreachable, the run is logged and the app keeps serving what Tiger already has.
+
+### 6. Deploy to Vercel
+
+The whole app runs on Vercel as one Python function: `server.py` exposes a WSGI `app` that serves both the page and the API. Vercel functions can't keep a background loop running, so the live ingest moves to the **Live ingest** GitHub Actions workflow (`.github/workflows/live-ingest.yml`), which runs `scripts/tiger_data.py ingest` every 15 minutes. Nothing runs on your computer.
+
+1. **Vercel:** import the GitHub repo as a new project (no framework preset, build command or output directory needed; `vercel.json` and `.python-version` cover it). Under **Settings → Environment Variables**, add `QUAKETRACE_TIGER_DSN` with your Tiger connection string, then deploy.
+2. **GitHub:** under **Settings → Secrets and variables → Actions**, add the same `QUAKETRACE_TIGER_DSN` as a repository secret. Open **Actions → Live ingest → Run workflow** once to check it works; after that it runs on its own.
+3. **Locally**, run `server.py --ingest-minutes 0` from now on so your machine doesn't ingest too.
+
+What stays private: the connection string lives only in Vercel's and GitHub's secret stores. `.env` is gitignored and excluded from the Vercel upload (`.vercelignore`) and the function bundle (`vercel.json`). The site only serves files from `web/`, API errors never include database details, and visitors can't write to Tiger.
+
+Free-tier notes: Vercel may take a second or two to answer the first request after a quiet spell, so open the site once before judging. If the Tiger trial ends, the site falls back to the bundled north-east history.
 
 ### Troubleshooting
 

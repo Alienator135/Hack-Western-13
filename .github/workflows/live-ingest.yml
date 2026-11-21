@@ -1,0 +1,40 @@
+name: Live ingest
+
+# Vercel functions can't run the server's background ingest loop, so this
+# workflow keeps Tiger Data current instead: every 15 minutes it adds newly
+# published USGS quakes (north-east M1.0+ and worldwide M4.5+).
+# Needs the repository secret QUAKETRACE_TIGER_DSN. GitHub may start scheduled
+# runs a few minutes late, which the ingest's lookback window absorbs.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Add new USGS quakes to Tiger Data
+        env:
+          QUAKETRACE_TIGER_DSN: ${{ secrets.QUAKETRACE_TIGER_DSN }}
+        run: |
+          if [ -z "$QUAKETRACE_TIGER_DSN" ]; then
+            echo "::error::Add the QUAKETRACE_TIGER_DSN repository secret to enable live ingest."
+            exit 1
+          fi
+          python scripts/tiger_data.py ingest

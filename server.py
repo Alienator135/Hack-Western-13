@@ -5,6 +5,9 @@ Run from the repository root:
     python server.py            # http://127.0.0.1:8000
     python server.py --port 9000
 
+On Vercel the same app runs as a WSGI function (`app` below); live ingest then
+runs from the scheduled GitHub Actions workflow instead of a background thread.
+
 Map, satellite and 3D views use free, keyless MapLibre tiles in the browser.
 Without internet the UI uses the bundled state outlines and still works offline.
 """
@@ -32,6 +35,8 @@ from quaketrace.env import load_env
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 logger = logging.getLogger("quaketrace.server")
+mimetypes.add_type("text/javascript", ".js")
+load_env()  # project .env locally; on Vercel the dashboard's environment variables (either DSN name works)
 
 
 @lru_cache(maxsize=1)
@@ -122,55 +127,85 @@ def route(path: str, query: dict) -> bytes:
     raise LookupError(path)
 
 
+def _json_error(status: HTTPStatus, message: str) -> tuple[HTTPStatus, bytes, str]:
+    return status, json.dumps({"error": message}).encode(), "application/json"
+
+
+def _static(path: str) -> tuple[HTTPStatus, bytes, str]:
+    relative = "index.html" if path in ("", "/") else path.lstrip("/")
+    target = (WEB_ROOT / relative).resolve()
+    if WEB_ROOT not in target.parents or not target.is_file():
+        return _json_error(HTTPStatus.NOT_FOUND, "Not found.")
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    if content_type.startswith("text/") or content_type.endswith("javascript"):
+        content_type += "; charset=utf-8"
+    return HTTPStatus.OK, target.read_bytes(), content_type
+
+
+def respond(raw_path: str) -> tuple[HTTPStatus, bytes, str]:
+    """Answer one GET request: the JSON API under /api/, otherwise a file from web/."""
+    parsed = urlparse(raw_path)
+    if not parsed.path.startswith("/api/"):
+        return _static(parsed.path)
+    try:
+        body = route(parsed.path, parse_qs(parsed.query))
+    except LookupError:
+        return _json_error(HTTPStatus.NOT_FOUND, "Unknown endpoint.")
+    except ValueError as error:
+        return _json_error(HTTPStatus.BAD_REQUEST, str(error))
+    except (OSError, KeyError):
+        logger.exception("Could not load fixtures: %s", raw_path)
+        return _json_error(HTTPStatus.INTERNAL_SERVER_ERROR, "Could not load the demo data.")
+    except Exception:  # noqa: BLE001 - keep the server up and report JSON
+        logger.exception("Request failed: %s", raw_path)
+        return _json_error(HTTPStatus.INTERNAL_SERVER_ERROR, "The server hit an unexpected error.")
+    return HTTPStatus.OK, body, "application/json"
+
+
+def _headers(body: bytes, content_type: str) -> list[tuple[str, str]]:
+    return [
+        ("Content-Type", content_type),
+        ("Content-Length", str(len(body))),
+        ("Cache-Control", "no-store"),
+        ("X-Content-Type-Options", "nosniff"),
+    ]
+
+
 class Handler(BaseHTTPRequestHandler):
+    """Local development server (python server.py)."""
+
     server_version = "QuakeTrace/1.0"
 
     def log_message(self, format, *args):  # noqa: A002 - signature from BaseHTTPRequestHandler
         logger.info("%s %s", self.address_string(), format % args)
 
-    def _send(self, status: HTTPStatus, body: bytes, content_type: str, *, cache: bool = False):
+    def do_GET(self):  # noqa: N802 - http.server naming
+        status, body, content_type = respond(self.path)
         self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "public, max-age=300" if cache else "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        for name, value in _headers(body, content_type):
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
-
-    def _error(self, status: HTTPStatus, message: str):
-        self._send(status, json.dumps({"error": message}).encode(), "application/json")
-
-    def do_GET(self):  # noqa: N802 - http.server naming
-        parsed = urlparse(self.path)
-        if parsed.path.startswith("/api/"):
-            try:
-                body = route(parsed.path, parse_qs(parsed.query))
-            except LookupError:
-                return self._error(HTTPStatus.NOT_FOUND, "Unknown endpoint.")
-            except ValueError as error:
-                return self._error(HTTPStatus.BAD_REQUEST, str(error))
-            except (OSError, KeyError) as error:
-                logger.exception("Could not load fixtures")
-                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"Could not load the demo fixtures: {error}")
-            except Exception:  # noqa: BLE001 - keep the server up and report JSON
-                logger.exception("Request failed: %s", self.path)
-                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "The server hit an unexpected error.")
-            return self._send(HTTPStatus.OK, body, "application/json")
-        self._static(parsed.path)
 
     def do_HEAD(self):  # noqa: N802 - http.server naming
         self.send_response(HTTPStatus.OK if urlparse(self.path).path in ("", "/") else HTTPStatus.NOT_FOUND)
         self.end_headers()
 
-    def _static(self, path: str):
-        relative = "index.html" if path in ("", "/") else path.lstrip("/")
-        target = (WEB_ROOT / relative).resolve()
-        if WEB_ROOT not in target.parents or not target.is_file():
-            return self._error(HTTPStatus.NOT_FOUND, "Not found.")
-        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        if content_type.startswith("text/") or content_type.endswith("javascript"):
-            content_type += "; charset=utf-8"
-        self._send(HTTPStatus.OK, target.read_bytes(), content_type)
+
+def app(environ, start_response):
+    """WSGI entry point. Vercel's Python runtime serves this `app` from server.py."""
+    method = environ.get("REQUEST_METHOD", "GET")
+    query = environ.get("QUERY_STRING", "")
+    path = environ.get("PATH_INFO", "/") + (f"?{query}" if query else "")
+    if method not in ("GET", "HEAD"):
+        status, body, content_type = _json_error(HTTPStatus.METHOD_NOT_ALLOWED, "Only GET is supported.")
+    else:
+        status, body, content_type = respond(path)
+    start_response(f"{status.value} {status.phrase}", _headers(body, content_type))
+    return [b"" if method == "HEAD" else body]
+
+
+application = app  # the name Vercel's docs give for plain WSGI apps; `app` covers the rest
 
 
 def _warm_tiger():
@@ -222,7 +257,6 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     load_env()  # project .env (gitignored), e.g. Tiger Cloud credentials
-    mimetypes.add_type("text/javascript", ".js")
     fixture()  # Fail fast if fixtures are missing.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     source = fixture().arrival_source
