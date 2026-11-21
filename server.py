@@ -74,12 +74,44 @@ def lab_runs_json(event_id: str, station: str | None, offset_s: float) -> bytes:
     return json.dumps(api.lab_runs(fixture(), event_id, station, offset_s)).encode()
 
 
+MAX_SHIFT_S = 10.0
+
+
 def _offset(query: dict) -> float:
+    """A shift the UI sliders can send: -10 to +10 s in 0.5 s steps.
+
+    Anything else is rejected, so each expensive fit or Tiger scan has only
+    41 possible shifts and the CDN and in-process caches absorb repeats.
+    """
     raw = query.get("offset", ["0"])[0] or "0"
-    value = float(raw)
-    if value != value:  # NaN
-        raise ValueError("Shift must be a number.")
-    return round(value, 2)
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError("Shift must be a number.") from None
+    if not abs(value) <= MAX_SHIFT_S or (value * 2) != int(value * 2):  # also rejects NaN and inf
+        raise ValueError(f"Shift must be between -{MAX_SHIFT_S:g} and +{MAX_SHIFT_S:g} s in 0.5 s steps.")
+    return value + 0.0  # -0.0 -> 0.0
+
+
+HISTORY_TTL_S = 60
+_history_cache: dict[tuple, tuple[float, bytes]] = {}
+_history_lock = threading.Lock()
+
+
+def history_json(station: str | None, onset: str | None, offset_s: float, region: str) -> bytes:
+    """Live Tiger query, reused for HISTORY_TTL_S so bursts of identical requests cost one query."""
+    key = (station, onset, offset_s, region)
+    now = time.monotonic()
+    with _history_lock:
+        hit = _history_cache.get(key)
+        if hit and now - hit[0] < HISTORY_TTL_S:
+            return hit[1]
+    body = json.dumps(api.history_view(station, onset, offset_s, region)).encode()
+    with _history_lock:
+        if len(_history_cache) >= 256:
+            _history_cache.clear()
+        _history_cache[key] = (now, body)
+    return body
 
 
 BENCHMARK_FILE = Path(__file__).resolve().parent / "fixtures" / "benchmark.json"
@@ -116,14 +148,16 @@ def route(path: str, query: dict) -> bytes:
         onset = query.get("onset", [None])[0] or None
         return audit_json(station if offset else None, onset if offset else None, offset)
     if path == "/api/history":
-        # Not cached: with Tiger Data connected, every call is a live query.
         offset = _offset(query)
         station = query.get("station", [None])[0] or None
         onset = query.get("onset", [None])[0] or None
         if onset and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", onset):
             raise ValueError("Onset must be a date like 2024-04-27.")
         region = query.get("region", ["northeast"])[0] or "northeast"
-        return json.dumps(api.history_view(station, onset, offset, region)).encode()
+        # The shift only matters with a station and onset; dropping it otherwise keeps cache keys few.
+        if not (offset and station and onset):
+            offset, onset = 0.0, None
+        return history_json(station, onset, offset, region)
     raise LookupError(path)
 
 
@@ -140,6 +174,23 @@ def _static(path: str) -> tuple[HTTPStatus, bytes, str]:
     if content_type.startswith("text/") or content_type.endswith("javascript"):
         content_type += "; charset=utf-8"
     return HTTPStatus.OK, target.read_bytes(), content_type
+
+
+# How long Vercel's CDN may reuse a successful response (s-maxage), so repeat
+# visits never reach the function or Tiger. Browsers always revalidate
+# (max-age=0); each deployment starts with an empty CDN cache.
+CACHE_STATIC = "public, max-age=0, s-maxage=86400, stale-while-revalidate=86400"
+CACHE_FIXED = CACHE_STATIC  # fixture-based answers: same URL, same answer
+CACHE_LIVE = f"public, max-age=0, s-maxage={HISTORY_TTL_S}, stale-while-revalidate=300"
+NO_STORE = "no-store"
+
+
+def cache_policy(path: str, status: HTTPStatus) -> str:
+    if status != HTTPStatus.OK:
+        return NO_STORE
+    if not path.startswith("/api/"):
+        return CACHE_STATIC
+    return CACHE_LIVE if path == "/api/history" else CACHE_FIXED
 
 
 def respond(raw_path: str) -> tuple[HTTPStatus, bytes, str]:
@@ -162,11 +213,11 @@ def respond(raw_path: str) -> tuple[HTTPStatus, bytes, str]:
     return HTTPStatus.OK, body, "application/json"
 
 
-def _headers(body: bytes, content_type: str) -> list[tuple[str, str]]:
+def _headers(raw_path: str, status: HTTPStatus, body: bytes, content_type: str) -> list[tuple[str, str]]:
     return [
         ("Content-Type", content_type),
         ("Content-Length", str(len(body))),
-        ("Cache-Control", "no-store"),
+        ("Cache-Control", cache_policy(urlparse(raw_path).path, status)),
         ("X-Content-Type-Options", "nosniff"),
     ]
 
@@ -182,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - http.server naming
         status, body, content_type = respond(self.path)
         self.send_response(status)
-        for name, value in _headers(body, content_type):
+        for name, value in _headers(self.path, status, body, content_type):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
@@ -201,7 +252,7 @@ def app(environ, start_response):
         status, body, content_type = _json_error(HTTPStatus.METHOD_NOT_ALLOWED, "Only GET is supported.")
     else:
         status, body, content_type = respond(path)
-    start_response(f"{status.value} {status.phrase}", _headers(body, content_type))
+    start_response(f"{status.value} {status.phrase}", _headers(path, status, body, content_type))
     return [b"" if method == "HEAD" else body]
 
 

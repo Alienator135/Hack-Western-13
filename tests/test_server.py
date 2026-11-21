@@ -34,3 +34,35 @@ class WsgiAppTests(unittest.TestCase):
 
     def test_vercel_names(self):
         self.assertIs(server.application, server.app)
+
+
+class ShiftAndCacheTests(unittest.TestCase):
+    def test_only_slider_shifts_are_accepted(self):
+        for raw, expected in (("0", 0.0), ("-0", 0.0), ("3", 3.0), ("-2.5", -2.5), ("10", 10.0)):
+            self.assertEqual(server._offset({"offset": [raw]}), expected, raw)
+        for raw in ("1.23", "10.5", "-11", "nan", "inf", "abc", "1e9"):
+            with self.assertRaises(ValueError, msg=raw):
+                server._offset({"offset": [raw]})
+        status, headers, _ = call("/api/replay?offset=1.23")
+        self.assertEqual((status, headers["Cache-Control"]), ("400 Bad Request", "no-store"))
+
+    def test_cdn_cache_policy(self):
+        self.assertIn("s-maxage=86400", call("/app.js")[1]["Cache-Control"])
+        self.assertIn("s-maxage=60", server.cache_policy("/api/history", server.HTTPStatus.OK))
+        self.assertIn("s-maxage=86400", server.cache_policy("/api/lab", server.HTTPStatus.OK))
+        self.assertEqual(call("/api/nope")[1]["Cache-Control"], "no-store")
+        self.assertEqual(call("/../.env")[1]["Cache-Control"], "no-store")
+
+    def test_history_reuses_a_recent_query(self):
+        server._history_cache.clear()
+        calls = []
+        original = server.api.history_view
+        server.api.history_view = lambda *args: calls.append(args) or {"ok": True}
+        try:
+            first = server.history_json("LD.PAL", None, 0.0, "world")
+            second = server.history_json("LD.PAL", None, 0.0, "world")
+        finally:
+            server.api.history_view = original
+            server._history_cache.clear()
+        self.assertEqual(first, second)
+        self.assertEqual(len(calls), 1)
