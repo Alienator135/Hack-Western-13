@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 from quaketrace import api
 from quaketrace.data import MAINSHOCK, load_fixture
+from quaketrace.env import load_env
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 GOOGLE_KEY_ENV = "GOOGLE_MAPS_API_KEY"
@@ -173,6 +174,7 @@ def main():
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    load_env()  # project .env (gitignored), e.g. Tiger Cloud credentials
     mimetypes.add_type("text/javascript", ".js")
     fixture()  # Fail fast if fixtures are missing.
     server = ThreadingHTTPServer((args.host, args.port), Handler)

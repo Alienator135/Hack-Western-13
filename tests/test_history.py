@@ -1,4 +1,6 @@
+import json
 import tempfile
+from decimal import Decimal
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -101,7 +103,7 @@ class HistoryTests(unittest.TestCase):
             results = {
                 "compression_enabled": (False,), "count(compress_chunk": (2,), "continuous_aggregates": None,
                 "count(*), count(DISTINCT": (2, 1, 2, datetime(2024, 4, 27, tzinfo=UTC), datetime(2024, 4, 27, tzinfo=UTC)),
-                "timescaledb_information.chunks": (3, 2), "columnstore_stats": (1000, 250),
+                "timescaledb_information.chunks": (3, 2), "columnstore_stats": (Decimal(1000), Decimal(250)),
             }
 
             def execute(statement, *args):
@@ -111,17 +113,26 @@ class HistoryTests(unittest.TestCase):
                 return result
 
             connection.execute.side_effect = execute
-            summary = seed_history("dbname=test", [event], picks)
+            summary = seed_history("dbname=test", [event], picks, rebuild=True)
         self.assertEqual(copy.write_row.call_count, 2)
-        statements = " ".join(str(call.args[0]) for call in connection.execute.call_args_list)
+        calls = [str(call.args[0]) for call in connection.execute.call_args_list]
+        statements = " ".join(calls)
+        # Rebuild drops only the history objects, before recreating them, and never the demo table.
+        drops = [i for i, sql in enumerate(calls) if sql.startswith("DROP")]
+        self.assertEqual(len(drops), 3)
+        self.assertLess(max(drops), next(i for i, sql in enumerate(calls) if "create_hypertable" in sql))
+        self.assertNotIn("quaketrace.arrivals", " ".join(calls[i] for i in drops))
+        self.assertNotIn("compress_segmentby", statements)
         for expected in (
-            "create_hypertable", "timescaledb.compress_segmentby = 'station_id'", "add_compression_policy",
+            "create_hypertable", "INTERVAL '1 year'", "compress_orderby = 'station_id, phase, event_time DESC'",
+            "add_compression_policy",
             "CREATE MATERIALIZED VIEW quaketrace.station_monthly", "timescaledb.continuous",
             "add_continuous_aggregate_policy", "refresh_continuous_aggregate",
         ):
             self.assertIn(expected, statements)
         self.assertEqual(summary["compressedChunks"], 2)
         self.assertEqual(summary["compressionRatio"], 4.0)
+        json.dumps({k: v for k, v in summary.items()})  # Postgres numerics must not leak into JSON
         self.assertEqual(summary["inserted_picks"], 2)
 
 

@@ -186,10 +186,28 @@ HISTORY_SCHEMA = (
     """,
     """
     SELECT create_hypertable(
-        'quaketrace.picks', by_range('event_time', INTERVAL '90 days'), if_not_exists => TRUE
+        'quaketrace.picks', by_range('event_time', INTERVAL '1 year'), if_not_exists => TRUE
     )
     """,
     "CREATE INDEX IF NOT EXISTS picks_station_time ON quaketrace.picks (station_id, event_time DESC)",
+)
+
+# Regional networks report a few thousand picks a year spread over hundreds of
+# stations, so segmenting by station leaves one or two rows per segment and
+# compression gains nothing. Without segmentby, rows share 1,000-row batches
+# ordered by station and time; per-batch min/max metadata still lets station
+# filters skip batches.
+COMPRESSION_SETTINGS = """
+    ALTER TABLE quaketrace.picks SET (
+        timescaledb.compress,
+        timescaledb.compress_orderby = 'station_id, phase, event_time DESC'
+    )
+"""
+
+REBUILD_HISTORY = (
+    "DROP MATERIALIZED VIEW IF EXISTS quaketrace.station_monthly CASCADE",
+    "DROP TABLE IF EXISTS quaketrace.picks CASCADE",
+    "DROP TABLE IF EXISTS quaketrace.events CASCADE",
 )
 
 # Same filter as quaketrace.history.local_monthly_buckets.
@@ -276,9 +294,17 @@ def _first_row(connection, statements):
     return None
 
 
-def seed_history(dsn: str, events, picks) -> dict:
-    """Load the history bundle, then compress old chunks and build the monthly aggregate."""
+def seed_history(dsn: str, events, picks, *, rebuild: bool = False) -> dict:
+    """Load the history bundle, then compress old chunks and build the monthly aggregate.
+
+    rebuild drops and recreates only the history objects (picks, events, and
+    station_monthly) so new chunk and compression settings apply to every row.
+    The demo table quaketrace.arrivals is never touched.
+    """
     with _autocommit(dsn, "Tiger Data history seed") as connection:
+        if rebuild:
+            for statement in REBUILD_HISTORY:
+                connection.execute(statement)
         for statement in HISTORY_SCHEMA:
             connection.execute(statement)
         with connection.transaction():
@@ -307,15 +333,7 @@ def seed_history(dsn: str, events, picks) -> dict:
             """
         ).fetchone()
         if not (enabled and enabled[0]):
-            connection.execute(
-                """
-                ALTER TABLE quaketrace.picks SET (
-                    timescaledb.compress,
-                    timescaledb.compress_segmentby = 'station_id',
-                    timescaledb.compress_orderby = 'event_time DESC, phase'
-                )
-                """
-            )
+            connection.execute(COMPRESSION_SETTINGS)
         connection.execute(
             "SELECT add_compression_policy('quaketrace.picks', INTERVAL '180 days', if_not_exists => TRUE)"
         )
@@ -349,13 +367,14 @@ def history_stats(connection) -> dict:
     picks, events, stations, first, last = connection.execute(HISTORY_TOTALS).fetchone()
     chunks = _first_row(connection, (CHUNK_COUNTS,))
     sizes = _first_row(connection, COMPRESSION_SIZES)
-    ratio = round(sizes[0] / sizes[1], 1) if sizes and sizes[0] and sizes[1] else None
+    # Postgres returns these sums as numeric (Decimal); keep the payload JSON-safe.
+    ratio = round(float(sizes[0]) / float(sizes[1]), 1) if sizes and sizes[0] and sizes[1] else None
     return {
         "picks": int(picks), "events": int(events), "stations": int(stations),
         "first": first.astimezone(timezone.utc).isoformat() if first else None,
         "last": last.astimezone(timezone.utc).isoformat() if last else None,
-        "chunks": chunks[0] if chunks else None,
-        "compressedChunks": chunks[1] if chunks else None,
+        "chunks": int(chunks[0]) if chunks else None,
+        "compressedChunks": int(chunks[1]) if chunks else None,
         "compressionRatio": ratio,
     }
 

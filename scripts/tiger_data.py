@@ -12,6 +12,7 @@ import time
 
 from quaketrace.api import history_view
 from quaketrace.audit import audit
+from quaketrace.env import load_env
 from quaketrace.history import history_available, load_history
 from quaketrace.data import AUDIT_STATIONS, EVALUATION_EVENTS, TIGER_DSN_ENV, WAVEFORM_STATION, load_fixture
 from quaketrace.tiger import (
@@ -26,15 +27,21 @@ def main() -> int:
     commands.add_parser("verify", help="Compare Tiger Data results with the bundled dataset")
     history = commands.add_parser("history", help="Show weekly event-centred residuals")
     history.add_argument("--station", choices=AUDIT_STATIONS, default=WAVEFORM_STATION)
-    commands.add_parser(
+    seed_history_parser = commands.add_parser(
         "seed-history",
         help="Load fixtures/history (years of USGS picks) into a compressed hypertable with a monthly aggregate",
+    )
+    seed_history_parser.add_argument(
+        "--rebuild", action="store_true",
+        help="Drop and recreate quaketrace.picks, quaketrace.events and quaketrace.station_monthly first "
+             "so the current chunk and compression settings apply. The demo arrivals table is kept.",
     )
     health = commands.add_parser("health", help="Query monthly station clock health from Tiger Data")
     health.add_argument("--station", help="Inject a clock shift into this station's history")
     health.add_argument("--onset", help="Date the injected shift starts, e.g. 2024-04-27")
     health.add_argument("--offset", type=float, default=0.0, help="Injected shift in seconds")
     args = parser.parse_args()
+    load_env()
 
     dsn = getenv(TIGER_DSN_ENV)
     if not dsn:
@@ -64,7 +71,9 @@ def main() -> int:
             if not history_available():
                 raise TigerDataError("fixtures/history is missing. Run scripts/fetch_history.py first.")
             bundle = load_history()
-            summary = seed_history(dsn, bundle.events, bundle.picks)
+            if args.rebuild:
+                print("Rebuilding: dropping quaketrace.picks, quaketrace.events and quaketrace.station_monthly...")
+            summary = seed_history(dsn, bundle.events, bundle.picks, rebuild=args.rebuild)
             print(
                 f"Loaded {summary['inserted_picks']:,} new picks. Tiger now holds {summary['picks']:,} picks from "
                 f"{summary['events']:,} quakes at {summary['stations']:,} stations "
@@ -75,6 +84,8 @@ def main() -> int:
                 f"Hypertable chunks: {summary['chunks']} ({summary['compressedChunks']} compressed{ratio}). "
                 "Continuous aggregate quaketrace.station_monthly refreshed."
             )
+            if not args.rebuild and (summary.get("compressionRatio") or 0) < 1.5 and summary.get("compressedChunks"):
+                print("Compression is barely saving space. Run seed-history --rebuild to apply the current settings.")
         elif args.command == "health":
             started = time.perf_counter()
             view = history_view(args.station, args.onset, args.offset)
