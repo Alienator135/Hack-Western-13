@@ -19,7 +19,7 @@ export const MISFIT_MIN = 0.2;
 export const MISFIT_MAX = 14;
 export const misfitT = (rms) => Math.min(1, Math.max(0, Math.log(rms / MISFIT_MIN) / Math.log(MISFIT_MAX / MISFIT_MIN)));
 
-function rampColor(t) {
+export function rampColor(t) {
   for (let i = 1; i < RAMP.length; i += 1) {
     if (t <= RAMP[i][0]) {
       const [t0, a] = RAMP[i - 1];
@@ -41,7 +41,7 @@ export const LEGEND_TICKS = [0.25, 0.5, 1, 2, 4, 8];
 
 // ---------------------------------------------------------------- geometry
 
-function makeProjection(points, { pad = 0.07, w = W, h = H } = {}) {
+export function makeProjection(points, { pad = 0.07, w = W, h = H } = {}) {
   const lats = points.map((p) => p[0]);
   const lons = points.map((p) => p[1]);
   const south = Math.min(...lats), north = Math.max(...lats), west = Math.min(...lons), east = Math.max(...lons);
@@ -57,7 +57,7 @@ function makeProjection(points, { pad = 0.07, w = W, h = H } = {}) {
   return project;
 }
 
-function gridGeometry(pass) {
+export function gridGeometry(pass) {
   const rows = pass.lats.length, cols = pass.lons.length;
   const dLat = pass.lats[1] - pass.lats[0];
   const dLon = pass.lons[1] - pass.lons[0];
@@ -68,7 +68,7 @@ function gridGeometry(pass) {
   };
 }
 
-function heatImage(pass, alpha = 230, toT = misfitT) {
+export function heatImage(pass, alpha = 230, toT = misfitT) {
   const g = gridGeometry(pass);
   const canvas = document.createElement("canvas");
   canvas.width = g.cols; canvas.height = g.rows;
@@ -110,7 +110,7 @@ function contourSegments(pass, level) {
   return segs;
 }
 
-function triangle(ctx, x, y, size, fill) {
+export function triangle(ctx, x, y, size, fill) {
   ctx.beginPath();
   ctx.moveTo(x, y - size);
   ctx.lineTo(x - size, y + size * 0.85);
@@ -123,7 +123,7 @@ function triangle(ctx, x, y, size, fill) {
   ctx.stroke();
 }
 
-function star(ctx, x, y, r) {
+export function star(ctx, x, y, r) {
   ctx.beginPath();
   for (let i = 0; i < 10; i += 1) {
     const rad = i % 2 ? r * 0.42 : r;
@@ -138,7 +138,7 @@ function star(ctx, x, y, r) {
   ctx.stroke();
 }
 
-function haloText(ctx, text, x, y, { font = "500 12px 'JetBrains Mono', monospace", color = "#2B323C", align = "left" } = {}) {
+export function haloText(ctx, text, x, y, { font = "500 12px 'JetBrains Mono', monospace", color = "#2B323C", align = "left" } = {}) {
   ctx.font = font;
   ctx.textAlign = align;
   ctx.lineWidth = 3;
@@ -148,7 +148,7 @@ function haloText(ctx, text, x, y, { font = "500 12px 'JetBrains Mono', monospac
   ctx.fillText(text, x, y);
 }
 
-const ease = (t) => 1 - (1 - t) ** 3;
+export const ease = (t) => 1 - (1 - t) ** 3;
 
 // ---------------------------------------------------------------- main canvas
 
