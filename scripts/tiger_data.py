@@ -44,6 +44,8 @@ def main() -> int:
                                help="Recheck this many days before the newest quake (late phase data)")
     ingest_parser.add_argument("--backfill-days", type=float,
                                help="Load every quake from this many days ago, e.g. 365 for a year of world data")
+    ingest_parser.add_argument("--min-magnitude", type=float,
+                               help="Only load quakes at or above this magnitude, e.g. 5.5 for a lighter world backfill")
     ingest_parser.add_argument("--watch", type=float, metavar="MINUTES",
                                help="Keep running, checking USGS every MINUTES")
     health = commands.add_parser("health", help="Query monthly station clock health from Tiger Data")
@@ -108,6 +110,7 @@ def main() -> int:
                     summary = ingest(
                         dsn, feed=feed, lookback_days=args.lookback_days, backfill_days=args.backfill_days,
                         max_events=None if args.backfill_days else MAX_EVENTS_PER_RUN, progress=progress,
+                        min_magnitude=args.min_magnitude,
                     )
                     print(
                         f"{feed}: checked {summary['checked']:,} USGS quakes from {summary['windowStart'][:10]} to "

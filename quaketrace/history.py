@@ -85,10 +85,16 @@ def _float(value: str | None) -> float | None:
     return number if number is not None and math.isfinite(number) else None
 
 
+def quakeml_time(value: str) -> datetime:
+    """QuakeML times are UTC by definition; some networks (e.g. hv, ci, uu) omit the Z."""
+    timestamp = datetime.fromisoformat(value)
+    return timestamp.replace(tzinfo=timezone.utc) if timestamp.tzinfo is None else timestamp.astimezone(timezone.utc)
+
+
 def parse_event_picks(event_id: str, content: bytes, *, magnitude: float | None = None, place: str = ""):
     """Parse a USGS phase-data QuakeML into its origin and every arrival with a residual."""
     event, origin = preferred_origin(content)
-    event_time = utc(origin.findtext("{*}time/{*}value", ""))
+    event_time = quakeml_time(origin.findtext("{*}time/{*}value", ""))
     record = HistoryEvent(
         event_id, event_time,
         float(origin.findtext("{*}latitude/{*}value", "")),
@@ -112,7 +118,7 @@ def parse_event_picks(event_id: str, content: bytes, *, magnitude: float | None 
         weight = _float(arrival.findtext("{*}timeWeight")) or 0.0
         row = HistoryPick(
             event_time, event_id, f"{network}.{station}", waveform.get("locationCode") or "--",
-            waveform.get("channelCode") or "", phase, utc(pick_time), residual, weight,
+            waveform.get("channelCode") or "", phase, quakeml_time(pick_time), residual, weight,
             _float(arrival.findtext("{*}distance")), _float(arrival.findtext("{*}azimuth")),
         )
         # One row per station and phase: the arrival the solution weighted most.

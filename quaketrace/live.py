@@ -82,15 +82,48 @@ def fetch(url: str, attempts: int = 7, timeout: float = 60) -> bytes:
     raise RuntimeError("unreachable")
 
 
+CATALOG_LIMIT = 20000
+# USGS returns at most CATALOG_LIMIT quakes per request; a year of M4.5+ worldwide is ~8,000.
+CATALOG_WINDOW = timedelta(days=365)
+
+
+def _parse_time(value: str) -> datetime:
+    moment = datetime.fromisoformat(value)
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def catalog_windows(start: str, end: str, step: timedelta = CATALOG_WINDOW) -> list[tuple[str, str]]:
+    """Split [start, end) into consecutive windows no longer than step, oldest first."""
+    first, last = _parse_time(start), _parse_time(end)
+    windows = []
+    while first < last:
+        stop = min(first + step, last)
+        windows.append((_usgs_time(first), _usgs_time(stop)))
+        first = stop
+    return windows
+
+
 def catalog(start: str, end: str, minimum_magnitude: float, *, attempts: int = 7,
             bounds: dict | None = REGION) -> list[dict]:
-    """Catalog features in the bounds (None: worldwide) and time window that have phase data."""
-    query = urlencode({
-        "format": "geojson", "eventtype": "earthquake", "orderby": "time-asc", "limit": 20000,
-        "starttime": start, "endtime": end, "minmagnitude": minimum_magnitude, **(bounds or {}),
-    })
-    features = json.loads(fetch(f"{CATALOG}?{query}", attempts=attempts))["features"]
-    return [row for row in features if "phase-data" in (row["properties"].get("types") or "")]
+    """Catalog features in the bounds (None: worldwide) and time window that have phase data, oldest first.
+
+    Long windows are requested a year at a time so no request hits the USGS result limit.
+    """
+    features, seen = [], set()
+    for window_start, window_end in catalog_windows(start, end):
+        query = urlencode({
+            "format": "geojson", "eventtype": "earthquake", "orderby": "time-asc", "limit": CATALOG_LIMIT,
+            "starttime": window_start, "endtime": window_end, "minmagnitude": minimum_magnitude, **(bounds or {}),
+        })
+        rows = json.loads(fetch(f"{CATALOG}?{query}", attempts=attempts))["features"]
+        if len(rows) >= CATALOG_LIMIT:
+            raise ValueError(f"USGS returned {len(rows)} quakes for {window_start} to {window_end}; narrow the window")
+        for row in rows:
+            # A quake exactly on a window boundary can come back twice.
+            if row["id"] not in seen and "phase-data" in (row["properties"].get("types") or ""):
+                seen.add(row["id"])
+                features.append(row)
+    return features
 
 
 def phase_data_url(event_id: str, detail: dict) -> str | None:
@@ -123,12 +156,13 @@ def _usgs_time(moment: datetime) -> str:
 def ingest(
     dsn: str, *, feed: str = "northeast", lookback_days: float | None = None, backfill_days: float | None = None,
     now: datetime | None = None, get_catalog=None, get_event=None, max_events: int | None = MAX_EVENTS_PER_RUN,
-    progress=None,
+    progress=None, min_magnitude: float | None = None,
 ) -> dict:
     """Add quakes USGS has published since Tiger's newest one for this feed. Returns a run summary.
 
     backfill_days starts the window that many days before now instead (to load
-    history). Raises TigerDataError when Tiger is unreachable, or when the
+    history). min_magnitude overrides the feed's threshold, e.g. a lighter
+    M5.5+ backfill of the world feed. Raises TigerDataError when Tiger is unreachable, or when the
     north-east feed has no seeded history. A USGS outage is logged in
     quaketrace.ingest_runs and reported in the summary instead.
     """
@@ -157,7 +191,7 @@ def ingest(
     added_events, skipped, checked, error, features = [], 0, 0, None, []
     new_events = new_picks = 0
     try:
-        features = get_catalog(_usgs_time(start), _usgs_time(now), spec.min_magnitude)
+        features = get_catalog(_usgs_time(start), _usgs_time(now), spec.min_magnitude if min_magnitude is None else min_magnitude)
         checked = len(features)
     except (OSError, ValueError, KeyError) as problem:
         error = f"USGS catalog request failed ({type(problem).__name__})."

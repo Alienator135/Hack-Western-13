@@ -53,6 +53,11 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(picks[1].location_code, "--")
         self.assertEqual(picks[1].weight, 0.0)
 
+    def test_quakeml_times_without_an_offset_are_utc(self):
+        naive = QUAKEML.replace(b"Z<", b"<")
+        self.assertNotEqual(naive, QUAKEML)
+        self.assertEqual(parse_event_picks("e1", naive), parse_event_picks("e1", QUAKEML))
+
     def test_bundle_round_trips(self):
         event, picks = parse_event_picks("e1", QUAKEML, magnitude=None, place="")
         with tempfile.TemporaryDirectory() as directory:

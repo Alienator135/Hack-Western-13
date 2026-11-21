@@ -28,7 +28,7 @@ class IngestTests(unittest.TestCase):
         self.refreshed = MagicMock()
 
     def run_ingest(self, *, latest=NEWEST, known=(), get_catalog=None, get_event=None, feed="northeast",
-                   backfill_days=None):
+                   backfill_days=None, min_magnitude=None):
         stored = {"added": []}
 
         @contextmanager
@@ -49,7 +49,7 @@ class IngestTests(unittest.TestCase):
             invalidate_overview=MagicMock(),
         ):
             summary = live.ingest(
-                "dbname=test", now=NOW, feed=feed, backfill_days=backfill_days,
+                "dbname=test", now=NOW, feed=feed, backfill_days=backfill_days, min_magnitude=min_magnitude,
                 get_catalog=get_catalog or (lambda start, end, minimum: [feature("a"), feature("b"), feature("c")]),
                 get_event=get_event or (lambda item: parsed(item["id"])),
             )
@@ -103,6 +103,12 @@ class IngestTests(unittest.TestCase):
         self.run_ingest(latest=NEWEST, feed="world", backfill_days=365, get_catalog=get_catalog)
         self.assertEqual(windows, [("2026-11-14T18:00:00", 4.5), ("2025-11-21T18:00:00", 4.5)])
 
+    def test_min_magnitude_overrides_the_feed_threshold(self):
+        minimums = []
+        self.run_ingest(feed="world", backfill_days=365, min_magnitude=5.5,
+                        get_catalog=lambda start, end, minimum: minimums.append(minimum) or [])
+        self.assertEqual(minimums, [5.5])
+
     def test_saves_in_batches(self):
         many = [feature(f"e{i}") for i in range(live.BATCH + 5)]
         summary, stored = self.run_ingest(get_catalog=lambda start, end, minimum: many)
@@ -137,3 +143,26 @@ class StoreEventsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CatalogWindowTests(unittest.TestCase):
+    def test_long_ranges_split_into_yearly_requests(self):
+        windows = live.catalog_windows("2018-01-01", "2026-11-21T18:00:00")
+        self.assertEqual(len(windows), 9)
+        self.assertEqual(windows[0][0], "2018-01-01T00:00:00")
+        self.assertEqual(windows[-1][1], "2026-11-21T18:00:00")
+        for (_, stop), (start, _) in zip(windows, windows[1:]):
+            self.assertEqual(stop, start)
+
+    def test_short_range_is_one_request(self):
+        self.assertEqual(len(live.catalog_windows("2026-11-14T00:00:00", "2026-11-21T00:00:00")), 1)
+
+    def test_catalog_merges_windows_and_drops_duplicates(self):
+        pages = [
+            {"features": [feature("a"), feature("b")]},
+            {"features": [feature("b"), feature("c"), {"id": "d", "properties": {"types": ",origin,"}}]},
+        ]
+        with patch.object(live, "fetch", side_effect=[__import__("json").dumps(page).encode() for page in pages]) as fetch:
+            rows = live.catalog("2024-01-01", "2025-06-01", 4.5, bounds=None)
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual([row["id"] for row in rows], ["a", "b", "c"])
