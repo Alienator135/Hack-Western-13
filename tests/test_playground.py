@@ -55,6 +55,16 @@ class PlaygroundTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             playground.try_quake(self.well_recorded()["id"], "XX.NONE", 3.0)
 
+    def test_saved_world_fit_is_used_only_while_it_matches(self):
+        quake = next(iter(playground.quakes()[0].values()))
+        computed = playground.world_fit_rms(quake)
+        saved = {quake.event_id: [len(quake.station_ids), 0.123]}
+        with mock.patch.object(playground, "_saved_world_fits", return_value=saved):
+            self.assertEqual(playground.world_fit_rms(quake), 0.123)
+        saved[quake.event_id][0] += 1  # station count changed since it was saved
+        with mock.patch.object(playground, "_saved_world_fits", return_value=saved):
+            self.assertAlmostEqual(playground.world_fit_rms(quake), computed)
+
     def test_server_routes(self):
         status, body, _ = server.respond("/api/quakes")
         self.assertEqual(status, 200)

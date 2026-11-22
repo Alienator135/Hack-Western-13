@@ -251,6 +251,7 @@ The Map, Satellite and Earth 3D views use [MapLibre GL JS](https://maplibre.org/
 | `scripts/tiger_data.py` | Seeds Tiger Data, verifies it, runs the live ingest and queries station health |
 | `scripts/fetch_history.py` | Downloads the multi-year USGS arrival history into `fixtures/history` |
 | `scripts/run_benchmark.py` | Precomputes `fixtures/benchmark.json` (about 40 s) |
+| `scripts/cache_world_fits.py` | Saves each worldwide quake's untouched fit to `fixtures/world_fits.json`, so a cold server skips refitting them (needs Tiger Data) |
 | `scripts/fetch_fixtures.py` | Downloads, validates and builds the seven-quake demo fixture |
 | `fixtures/` | Seven event origins, 45 arrival and station-epoch records, waveform, local outlines and provenance manifest; `fixtures/history` holds the multi-year history bundle |
 | `tests/` | Fixtures, parsers, solver, audit, history, benchmark, Try any quake, Tiger Data, API and server |

@@ -12,6 +12,7 @@ worldwide quakes recorded at teleseismic distances are out of scope.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -22,7 +23,7 @@ from os import getenv
 import numpy as np
 
 from . import benchmark as bm
-from .data import TIGER_DSN_ENV, StationLocation
+from .data import DEFAULT_FIXTURES, TIGER_DSN_ENV, StationLocation
 from .history import History, HistoryEvent, HistoryPick, load_history, region_of
 from .replay import distance_km
 
@@ -67,6 +68,26 @@ MAX_WORLD_RMS_S = 0.5
 # Measured on the 37 worldwide quakes that passed these rules (Nov 2026), shifting
 # every station of every quake by +/-3 s and +/-5 s: share where QuakeTrace named it.
 WORLD_BENCHMARK = {"quakes": 37, "caught3": 0.65, "caught5": 0.81, "falseFlags": 0.0}
+# Each worldwide quake's untouched fit, saved by scripts/cache_world_fits.py so a cold
+# server does not refit dozens of quakes (seconds) before answering. Keyed by quake id
+# with its station count; quakes missing or changed since are fitted on the fly.
+WORLD_FITS_FILE = DEFAULT_FIXTURES / "world_fits.json"
+
+
+@lru_cache(maxsize=1)
+def _saved_world_fits() -> dict:
+    try:
+        return json.loads(WORLD_FITS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def world_fit_rms(quake: bm.Quake) -> float:
+    """RMS of the untouched all-station fit, from the saved file when it still matches."""
+    saved = _saved_world_fits().get(quake.event_id)
+    if saved and saved[0] == len(quake.station_ids):
+        return saved[1]
+    return bm.LocalGrid(quake).fit(quake.times_s).rms_s
 
 
 @lru_cache(maxsize=1)
@@ -126,9 +147,10 @@ def quakes() -> tuple[dict[str, bm.Quake], set[str], str]:
         except TigerDataError as error:
             logger.warning("Try any quake: using the bundled history (%s)", error)
     found = {quake.event_id: quake for quake in bm.benchmark_quakes(history)}
+    _cache["all_world"] = {event_id: found[event_id] for event_id in world & set(found)}
     for event_id in list(world & set(found)):
         quake = found[event_id]
-        if bm.LocalGrid(quake).fit(quake.times_s).rms_s >= MAX_WORLD_RMS_S:
+        if world_fit_rms(quake) >= MAX_WORLD_RMS_S:
             del found[event_id]
     with _lock:
         _cache.update(at=time.monotonic(), quakes=found, live=live & set(found), source=source, world=world & set(found))
