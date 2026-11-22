@@ -355,7 +355,9 @@ class LibreMap {
       center: [-74.6, 40.8], zoom: 7,
       pitch: earth ? 52 : 0, bearing: earth ? 8 : 0, maxPitch: 75,
       attributionControl: { compact: true },
-      cooperativeGestures: true,
+      // Mouse wheel over the map zooms it. Touch screens keep two-finger panning
+      // so a one-finger swipe still scrolls the page.
+      cooperativeGestures: window.matchMedia?.("(pointer: coarse)").matches ?? false,
       dragRotate: earth, pitchWithRotate: earth, touchPitch: earth,
     });
     this.map = map;
