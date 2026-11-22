@@ -37,7 +37,7 @@ const state = {
   benchmark: { data: null, shift: 3 },
   history: { view: null, station: "LD.PAL", onset: "2024-04-27", offset: 3, applied: false, scrollTo: false, region: "northeast" },
   explain: { event: null, station: null, offset: 5, secret: false, step: -1, base: null, story: null, steps: null },
-  tryq: { list: null, event: null, station: null, offset: 3, applied: false, secret: false, revealed: false, filter: "", sort: "newest", result: null },
+  tryq: { list: null, event: null, station: null, offset: 3, applied: false, secret: false, revealed: false, filter: "", sort: "newest", region: "all", result: null },
   lab: { event: null, station: null, offset: 0, exclude: null, secret: false, mode: "search", data: null, runs: null, played: false },
 };
 
@@ -1095,6 +1095,7 @@ function toggleFullscreen() {
 // ---------------------------------------------------------------- try any quake
 
 const TRY_SORTS = [["newest", "Newest"], ["largest", "Largest"], ["stations", "Most stations"]];
+const TRY_REGIONS = [["all", "All"], ["northeast", "North-east US"], ["world", "Worldwide"]];
 
 function tryQuakeRow(q) {
   const t = state.tryq;
@@ -1109,7 +1110,8 @@ function tryQuakeRow(q) {
 function tryFiltered() {
   const t = state.tryq;
   const needle = t.filter.trim().toLowerCase();
-  const rows = t.list.quakes.filter((q) => !needle || `${q.place} ${q.id} ${q.time.slice(0, 10)}`.toLowerCase().includes(needle));
+  const rows = t.list.quakes.filter((q) => (t.region === "all" || q.region === t.region)
+    && (!needle || `${q.place} ${q.id} ${q.time.slice(0, 10)}`.toLowerCase().includes(needle)));
   if (t.sort === "largest") rows.sort((a, b) => (b.magnitude ?? -9) - (a.magnitude ?? -9));
   else if (t.sort === "stations") rows.sort((a, b) => b.stations - a.stations);
   return rows;
@@ -1164,6 +1166,8 @@ function renderTry() {
   const list = t.list;
   const b = list.benchmark;
   const live = list.quakes.filter((q) => q.live).length;
+  const worldCount = list.quakes.filter((q) => q.region === "world").length;
+  const wb = list.worldBenchmark;
   const ev = res.event;
   const hidden = t.secret && !t.revealed;
   const v = tryVerdict(res);
@@ -1179,17 +1183,19 @@ function renderTry() {
     { label: "QuakeTrace", value: qt.usgsKm, tone: "good", hot: true },
   ];
   render(`
-    ${headline("Now break a clock on any real quake.", `${list.quakes.length.toLocaleString()} north-east US quakes since 2018 with at least 6 stations nearby${live ? ` · <b>${live}</b> streamed in live from Tiger Data` : ""}. Pick one, change one station's clock, and see if QuakeTrace names it.`)}
+    ${headline("Now break a clock on any real quake.", `${(list.quakes.length - worldCount).toLocaleString()} north-east US quakes since 2018${worldCount ? ` and <b>${worldCount}</b> worldwide quakes from dense local networks (Ridgecrest M7.1 among them)` : ""}, all with at least 6 stations within 150 km${live ? ` · <b>${live}</b> streamed in live from Tiger Data` : ""}. Pick one, change one station's clock, and see if QuakeTrace names it.`)}
     ${b ? `<div class="history-stats try-proof">
-      <span class="history-chip">Tested on all <b>${b.quakes}</b>: names the broken station <b>${Math.round(b.caught3 * 100)}%</b> of the time at ±3 s, <b>${Math.round(b.caught5 * 100)}%</b> at ±5 s</span>
+      <span class="history-chip">North-east, tested on all <b>${b.quakes}</b>: names the broken station <b>${Math.round(b.caught3 * 100)}%</b> of the time at ±3 s, <b>${Math.round(b.caught5 * 100)}%</b> at ±5 s</span>
       <span class="history-chip">median error at ±3 s: <b>${b.quaketrace3Km.toFixed(1)} km</b> vs ${b.naive3Km.toFixed(1)} km using every station</span>
       <span class="history-chip">false alarms on untouched quakes: <b>${Math.round(b.falseFlags * 100)}%</b></span>
+      ${worldCount && wb ? `<span class="history-chip">worldwide set: <b>${Math.round(wb.caught3 * 100)}%</b> at ±3 s, <b>${Math.round(wb.caught5 * 100)}%</b> at ±5 s</span>` : ""}
     </div>` : ""}
     <div class="row">
       <div class="main-col" style="display:flex;flex-direction:column;gap:16px">
         <section class="card pad try-picker">
           <div class="try-picker-head">
             <div class="kicker" style="color:var(--blue-ink)">1 · PICK A QUAKE</div>
+            ${worldCount ? `<div class="seg" role="group" aria-label="Which quakes">${TRY_REGIONS.map(([key, label]) => `<button type="button" data-action="tq-region" data-region="${key}" aria-pressed="${t.region === key}">${label}</button>`).join("")}</div>` : ""}
             <div class="seg" role="group" aria-label="Sort quakes">${TRY_SORTS.map(([key, label]) => `<button type="button" data-action="tq-sort" data-sort="${key}" aria-pressed="${t.sort === key}">${label}</button>`).join("")}</div>
           </div>
           <div class="try-search"><input id="tq-search" class="select small" type="search" placeholder="Search a place, date or ID (e.g. New Jersey, 2024-04)" value="${esc(t.filter)}" aria-label="Search quakes"><button class="btn-plain" type="button" data-action="tq-random">Random quake</button></div>
@@ -1396,6 +1402,11 @@ document.addEventListener("click", async (event) => {
       } else if (action === "tq-random") {
         const rows = tryFiltered();
         if (rows.length) await trySelect(rows[Math.floor(Math.random() * rows.length)].id);
+      } else if (action === "tq-region") {
+        state.tryq.region = target.dataset.region;
+        document.querySelectorAll("[data-action=tq-region]").forEach((b) => b.setAttribute("aria-pressed", String(b === target)));
+        $("#tq-list").innerHTML = tryListHtml();
+        $("#tq-list").scrollTop = 0;
       } else if (action === "tq-sort") {
         state.tryq.sort = target.dataset.sort;
         document.querySelectorAll("[data-action=tq-sort]").forEach((b) => b.setAttribute("aria-pressed", String(b === target)));

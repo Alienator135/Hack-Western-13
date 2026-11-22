@@ -183,7 +183,7 @@ After Present, open **Try any quake** and let judges play. It lists every north-
 
 The map shows the USGS epicentre, both fits and the blamed station; **Refit without each station** shows why it was blamed. Results are honest: small shifts or far stations can blend in, and some untouched quakes already have a station whose real reading disagrees. The benchmark headline above the list says how often it works.
 
-The model is a local crustal one (6 km/s, 5 km depth, stations within about 150 km), so worldwide quakes recorded thousands of kilometres away are out of scope. The locator is the benchmark's (`quaketrace/benchmark.py`): a 2 km grid centred on the first-reporting station, refined to 250 m, with station positions rebuilt from each reading's distance and azimuth. The API is `quaketrace/playground.py` (`/api/quakes`, `/api/try`).
+The model is a local crustal one (6 km/s, 5 km depth, stations within about 150 km). With Tiger Data connected, the list also includes worldwide quakes recorded by dense local networks (California, Nevada, Alaska, Puerto Rico and others), but only shallow ones (under 15 km) whose untouched readings fit the model within 0.5 s: about 37 quakes, including Ridgecrest M7.1. On those it names a broken clock 65% of the time at ±3 s and 81% at ±5 s, with no false alarms. Quakes heard only by distant stations need a global travel-time model and are out of scope. The locator is the benchmark's (`quaketrace/benchmark.py`): a 2 km grid centred on the first-reporting station, refined to 250 m, with station positions rebuilt from each reading's distance and azimuth. The API is `quaketrace/playground.py` (`/api/quakes`, `/api/try`).
 
 ## Benchmark
 

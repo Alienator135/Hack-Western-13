@@ -45,6 +45,20 @@ class BenchmarkTests(unittest.TestCase):
         self.assertLess(trial["quaketrace"], 0.5)
         self.assertLess(trial["quaketrace"], trial["naive"])
 
+    def test_shared_leave_one_out_matches_separate_refits(self):
+        quake = synthetic_quake()
+        grid = bm.LocalGrid(quake)
+        times = quake.times_s.copy()
+        times[3] += 4.0
+        shared = grid.fits_without_each(times)
+        for index in range(len(times)):
+            keep = np.ones(len(times), bool)
+            keep[index] = False
+            alone = grid.fit(times, keep)
+            self.assertEqual((alone.east, alone.north), (shared[index].east, shared[index].north))
+            self.assertAlmostEqual(alone.rms_s, shared[index].rms_s, places=9)
+            self.assertAlmostEqual(alone.origin_s, shared[index].origin_s, places=9)
+
     def test_bundled_history_yields_hundreds_of_eligible_quakes(self):
         quakes = bm.benchmark_quakes(load_history())
         self.assertGreater(len(quakes), 500)

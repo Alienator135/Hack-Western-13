@@ -36,7 +36,7 @@
 <dialog id="about">
   <h2>About QuakeTrace</h2>
   <p>QuakeTrace finds the seismic station whose clock is wrong. Present walks through it on the April 2024 Tewksbury, New Jersey earthquake: a judge shifts one station's clock, and QuakeTrace refits the epicentre without each station in turn until the lying one stands out.</p>
-  <p>Try any quake runs the same check on any of the north-east US quakes since 2018 with at least six nearby stations, including new ones streamed in from USGS. The model assumes a 6 km/s crust and stations within about 150 km, so it covers local quakes, not distant worldwide ones.</p>
+  <p>Try any quake runs the same check on any north-east US quake since 2018 with at least six stations within 150 km, including new ones streamed in from USGS, plus worldwide quakes recorded by dense local networks (California, Nevada, Alaska, Puerto Rico and others). The model assumes a shallow quake in a uniform 6 km/s crust, so it only lists worldwide quakes that model fits well. Quakes heard only by distant stations need a global travel-time model.</p>
   <p>Scale it up uses Tiger Data: a compressed hypertable of years of USGS arrival picks and a continuous aggregate of each station's monthly timing, queried live, including any clock shift a judge injects.</p>
   <form method="dialog" class="dialog-actions"><button class="btn-plain" type="submit">Close</button></form>
 </dialog>

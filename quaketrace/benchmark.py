@@ -178,12 +178,51 @@ class LocalGrid:
         index = int(np.argmin(mse))
         return index, float(origins[index]), float(np.sqrt(mse[index])), errors[index]
 
-    def fit(self, times: np.ndarray, keep: np.ndarray | None = None, weights: np.ndarray | None = None) -> LocalFit:
+    def coarse_without_each(self, times: np.ndarray) -> np.ndarray:
+        """The best coarse cell for every refit that leaves out one station, in one pass.
+
+        Equal weights, so dropping station i just removes its term from the
+        running sums: one (cells x stations) array instead of one search per station.
+        """
+        implied = times[None, :] - self.coarse_tt
+        n = len(times) - 1
+        means = (implied.sum(axis=1)[:, None] - implied) / n
+        mse = ((implied ** 2).sum(axis=1)[:, None] - implied ** 2) / n - means ** 2
+        return np.argmin(mse, axis=0)
+
+    def fits_without_each(self, times: np.ndarray) -> list[LocalFit]:
+        """fit(times, keep=all but i) for every station i, sharing work between refits.
+
+        Refits that pick the same coarse cell share one fine grid, and each
+        refit's origin and misfit come from running sums minus station i's term.
+        """
+        n = len(times) - 1
+        coarse = self.coarse_without_each(times)
+        fits: list[LocalFit | None] = [None] * len(times)
+        for cell in np.unique(coarse):
+            members = np.flatnonzero(coarse == cell)
+            fine = np.clip(COARSE_POINTS[cell] + FINE_OFFSETS, -HALF_WIDTH_KM, HALF_WIDTH_KM)
+            implied = times[None, :] - self._travel(fine, self.positions)
+            total, squares = implied.sum(axis=1), (implied ** 2).sum(axis=1)
+            for i in members:
+                origins = (total - implied[:, i]) / n
+                mse = (squares - implied[:, i] ** 2) / n - origins ** 2
+                best = int(np.argmin(mse))
+                east, north = fine[best]
+                origin = float(origins[best])
+                travel = self._travel(np.array([[east, north]]), self.positions)[0]
+                edge = HALF_WIDTH_KM - max(abs(east), abs(north))
+                fits[i] = LocalFit(float(east), float(north), origin, float(np.sqrt(max(mse[best], 0.0))),
+                                   times - origin - travel, edge < FINE_KM)
+        return fits
+
+    def fit(self, times: np.ndarray, keep: np.ndarray | None = None, weights: np.ndarray | None = None,
+            coarse_index: int | None = None) -> LocalFit:
         """Coarse 2 km search, then 250 m around the best cell (the app's two passes)."""
         keep = np.ones(len(times), bool) if keep is None else keep
         w = np.ones(int(keep.sum())) if weights is None else weights[keep]
         t = times[keep]
-        index, *_ = self._best(self.coarse_tt[:, keep], t, w)
+        index = coarse_index if coarse_index is not None else self._best(self.coarse_tt[:, keep], t, w)[0]
         centre = COARSE_POINTS[index]
         fine = np.clip(centre + FINE_OFFSETS, -HALF_WIDTH_KM, HALF_WIDTH_KM)
         index, origin, rms, _ = self._best(self._travel(fine, self.positions[keep]), t, w)
@@ -213,12 +252,8 @@ def weighted_fit(grid: LocalGrid, times: np.ndarray, start: LocalFit) -> LocalFi
 
 def leave_one_out(grid: LocalGrid, times: np.ndarray) -> list[tuple[float, int, LocalFit, float]]:
     """(rms, station index, fit, left-out station's error) for each refit without one station, best first."""
-    candidates = []
-    for index in range(len(times)):
-        keep = np.ones(len(times), bool)
-        keep[index] = False
-        fit = grid.fit(times, keep)
-        candidates.append((fit.rms_s, index, fit, float(fit.errors_s[index])))
+    candidates = [(fit.rms_s, index, fit, float(fit.errors_s[index]))
+                  for index, fit in enumerate(grid.fits_without_each(times))]
     candidates.sort(key=lambda item: item[0])
     return candidates
 

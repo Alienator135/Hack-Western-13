@@ -23,14 +23,14 @@ import numpy as np
 
 from . import benchmark as bm
 from .data import TIGER_DSN_ENV, StationLocation
-from .history import History, HistoryEvent, HistoryPick, load_history
+from .history import History, HistoryEvent, HistoryPick, load_history, region_of
 from .replay import distance_km
 
 logger = logging.getLogger(__name__)
 
 LIVE_TTL_S = 600
 _lock = threading.Lock()
-_cache: dict = {"at": 0.0, "quakes": None, "live": set(), "source": "bundled"}
+_cache: dict = {"at": 0.0, "quakes": None, "live": set(), "source": "bundled", "world": set()}
 
 LIVE_EVENTS = """
     SELECT event_id, event_time, latitude, longitude, depth_km, magnitude, place
@@ -41,6 +41,32 @@ LIVE_PICKS = """
            pick_time, residual_s, weight, distance_deg, azimuth_deg
     FROM quaketrace.picks WHERE region = 'northeast' AND event_time > %s
 """
+# Worldwide quakes only work when local stations recorded them, so fetch just the
+# nearby P readings and the quakes they belong to (a few thousand rows).
+WORLD_PICKS = f"""
+    SELECT event_time, event_id, station_id, location_code, channel_code, phase,
+           pick_time, residual_s, weight, distance_deg, azimuth_deg
+    FROM quaketrace.picks
+    WHERE region = 'world' AND distance_deg <= {bm.MAX_DISTANCE_DEG} AND phase IN ('P', 'Pg')
+      AND abs(residual_s) < {bm.MAX_RESIDUAL_S}
+"""
+WORLD_EVENTS = f"""
+    SELECT event_id, event_time, latitude, longitude, depth_km, magnitude, place
+    FROM quaketrace.events
+    WHERE region = 'world' AND event_id IN (
+        SELECT event_id FROM quaketrace.picks
+        WHERE region = 'world' AND distance_deg <= {bm.MAX_DISTANCE_DEG} AND phase IN ('P', 'Pg')
+        GROUP BY event_id HAVING count(DISTINCT station_id) >= {bm.MIN_STATIONS}
+    )
+"""
+# The locator assumes a 5 km deep quake in a uniform 6 km/s crust. Outside the
+# north-east it only keeps quakes that model describes well: shallow, and with the
+# untouched readings fitting within 0.5 s. Looser fits hide a broken clock.
+MAX_WORLD_DEPTH_KM = 15.0
+MAX_WORLD_RMS_S = 0.5
+# Measured on the 37 worldwide quakes that passed these rules (Nov 2026), shifting
+# every station of every quake by +/-3 s and +/-5 s: share where QuakeTrace named it.
+WORLD_BENCHMARK = {"quakes": 37, "caught3": 0.65, "caught5": 0.81, "falseFlags": 0.0}
 
 
 @lru_cache(maxsize=1)
@@ -54,6 +80,8 @@ def _live_rows(dsn: str, after) -> tuple[list[HistoryEvent], list[HistoryPick]]:
     def run(connection):
         events = connection.execute(LIVE_EVENTS, (after,)).fetchall()
         picks = connection.execute(LIVE_PICKS, (after,)).fetchall()
+        events += connection.execute(WORLD_EVENTS).fetchall()
+        picks += connection.execute(WORLD_PICKS).fetchall()
         return events, picks
 
     events, picks = _with_shared_connection(dsn, "Tiger Data quake query", run)
@@ -67,13 +95,19 @@ def _live_rows(dsn: str, after) -> tuple[list[HistoryEvent], list[HistoryPick]]:
     )
 
 
+def world_eligible(event: HistoryEvent) -> bool:
+    """Worldwide quakes the local model handles: shallow ones (it assumes a 5 km depth)."""
+    return event.depth_km < MAX_WORLD_DEPTH_KM
+
+
 def quakes() -> tuple[dict[str, bm.Quake], set[str], str]:
-    """Every eligible quake by id, the ids that came from the live feed, and the source label."""
+    """Every eligible quake by id, the ids added since the bundled history ends, and the source label."""
     with _lock:
         if _cache["quakes"] is not None and time.monotonic() - _cache["at"] < LIVE_TTL_S:
             return _cache["quakes"], _cache["live"], _cache["source"]
     history = _bundled()
     live: set[str] = set()
+    world: set[str] = set()
     source = "bundled"
     dsn = getenv(TIGER_DSN_ENV)
     if dsn:
@@ -82,15 +116,22 @@ def quakes() -> tuple[dict[str, bm.Quake], set[str], str]:
         try:
             events, picks = _live_rows(dsn, last)
             known = {event.event_id for event in history.events}
-            events = [event for event in events if event.event_id not in known]
-            live = {event.event_id for event in events}
-            history = History(history.events + tuple(events), history.picks + tuple(p for p in picks if p.event_id in live))
+            events = [event for event in events if event.event_id not in known
+                      and (region_of(event.latitude, event.longitude) == "northeast" or world_eligible(event))]
+            world = {event.event_id for event in events if region_of(event.latitude, event.longitude) == "world"}
+            live = {event.event_id for event in events if event.event_time > last}
+            added = {event.event_id for event in events}
+            history = History(history.events + tuple(events), history.picks + tuple(p for p in picks if p.event_id in added))
             source = "tiger"
         except TigerDataError as error:
             logger.warning("Try any quake: using the bundled history (%s)", error)
     found = {quake.event_id: quake for quake in bm.benchmark_quakes(history)}
+    for event_id in list(world & set(found)):
+        quake = found[event_id]
+        if bm.LocalGrid(quake).fit(quake.times_s).rms_s >= MAX_WORLD_RMS_S:
+            del found[event_id]
     with _lock:
-        _cache.update(at=time.monotonic(), quakes=found, live=live & set(found), source=source)
+        _cache.update(at=time.monotonic(), quakes=found, live=live & set(found), source=source, world=world & set(found))
     return found, _cache["live"], source
 
 
@@ -118,10 +159,11 @@ def quake_list() -> dict:
     return {
         "source": source,
         "benchmark": _benchmark_summary(),
+        "worldBenchmark": WORLD_BENCHMARK,
         "quakes": [
             {"id": q.event_id, "time": q.time.isoformat(), "magnitude": q.magnitude, "place": q.place,
              "lat": round(q.latitude, 4), "lon": round(q.longitude, 4), "stations": len(q.station_ids),
-             "live": q.event_id in live}
+             "live": q.event_id in live, "region": "world" if q.event_id in _cache["world"] else "northeast"}
             for q in rows
         ],
     }
@@ -168,7 +210,8 @@ def try_quake(event_id: str, station: str | None, offset_s: float) -> dict:
     return {
         "event": {"id": quake.event_id, "time": quake.time.isoformat(), "magnitude": quake.magnitude,
                   "place": quake.place, "lat": quake.latitude, "lon": quake.longitude,
-                  "live": quake.event_id in live},
+                  "live": quake.event_id in live,
+                  "region": "world" if quake.event_id in _cache["world"] else "northeast"},
         "scenario": {"station": station if index is not None else None, "offsetS": offset_s if index is not None else 0.0},
         "stations": stations,
         "naive": _point(grid, naive, truth),
