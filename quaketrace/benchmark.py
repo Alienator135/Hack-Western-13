@@ -211,10 +211,8 @@ def weighted_fit(grid: LocalGrid, times: np.ndarray, start: LocalFit) -> LocalFi
     return fit
 
 
-def quaketrace_fit(grid: LocalGrid, times: np.ndarray, full: LocalFit) -> tuple[LocalFit, int | None]:
-    """The app's diagnose(): the leave-one-out refit when one station is clearly to blame."""
-    if full.at_boundary:
-        return full, None
+def leave_one_out(grid: LocalGrid, times: np.ndarray) -> list[tuple[float, int, LocalFit, float]]:
+    """(rms, station index, fit, left-out station's error) for each refit without one station, best first."""
     candidates = []
     for index in range(len(times)):
         keep = np.ones(len(times), bool)
@@ -222,6 +220,15 @@ def quaketrace_fit(grid: LocalGrid, times: np.ndarray, full: LocalFit) -> tuple[
         fit = grid.fit(times, keep)
         candidates.append((fit.rms_s, index, fit, float(fit.errors_s[index])))
     candidates.sort(key=lambda item: item[0])
+    return candidates
+
+
+def quaketrace_fit(grid: LocalGrid, times: np.ndarray, full: LocalFit,
+                   candidates: list | None = None) -> tuple[LocalFit, int | None]:
+    """The app's diagnose(): the leave-one-out refit when one station is clearly to blame."""
+    if full.at_boundary:
+        return full, None
+    candidates = candidates if candidates is not None else leave_one_out(grid, times)
     rms, index, best, offset = candidates[0]
     if best.at_boundary or abs(offset) < FLAG_OFFSET_S or rms > FLAG_RMS_RATIO * full.rms_s:
         return full, None

@@ -20,9 +20,8 @@
       </a>
       <nav class="nav" aria-label="Views">
         <a href="#/" data-view="explain">Present</a>
-        <a href="#/audit" data-view="audit">Station audit</a>
-        <a href="#/lab" data-view="lab">Solver lab</a>
-        <a href="#/benchmark" data-view="benchmark">Benchmark</a>
+        <a href="#/try" data-view="try">Try any quake</a>
+        <a href="#/audit" data-view="audit">Scale it up</a>
       </nav>
     </div>
     <div class="top-right">
@@ -36,8 +35,9 @@
 
 <dialog id="about">
   <h2>About QuakeTrace</h2>
-  <p>QuakeTrace replays real USGS arrival times from the April 2024 Tewksbury, New Jersey earthquake sequence. A judge shifts one station's clock, and QuakeTrace finds which station is lying by refitting the epicentre without each station in turn. The station audit tracks the same stations across seven quakes to date when a clock broke.</p>
-  <p>Years of station timing history live in Tiger Data: a compressed hypertable of USGS arrival picks and a continuous aggregate of each station's monthly timing. The audit queries it live, including any clock shift a judge injects.</p>
+  <p>QuakeTrace finds the seismic station whose clock is wrong. Present walks through it on the April 2024 Tewksbury, New Jersey earthquake: a judge shifts one station's clock, and QuakeTrace refits the epicentre without each station in turn until the lying one stands out.</p>
+  <p>Try any quake runs the same check on any of the north-east US quakes since 2018 with at least six nearby stations, including new ones streamed in from USGS. The model assumes a 6 km/s crust and stations within about 150 km, so it covers local quakes, not distant worldwide ones.</p>
+  <p>Scale it up uses Tiger Data: a compressed hypertable of years of USGS arrival picks and a continuous aggregate of each station's monthly timing, queried live, including any clock shift a judge injects.</p>
   <form method="dialog" class="dialog-actions"><button class="btn-plain" type="submit">Close</button></form>
 </dialog>
 

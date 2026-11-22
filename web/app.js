@@ -37,6 +37,7 @@ const state = {
   benchmark: { data: null, shift: 3 },
   history: { view: null, station: "LD.PAL", onset: "2024-04-27", offset: 3, applied: false, scrollTo: false, region: "northeast" },
   explain: { event: null, station: null, offset: 5, secret: false, step: -1, base: null, story: null, steps: null },
+  tryq: { list: null, event: null, station: null, offset: 3, applied: false, secret: false, revealed: false, filter: "", sort: "newest", result: null },
   lab: { event: null, station: null, offset: 0, exclude: null, secret: false, mode: "search", data: null, runs: null, played: false },
 };
 
@@ -92,6 +93,7 @@ function errorView(error) {
 }
 
 function currentView() {
+  if (location.hash.startsWith("#/try")) return "try";
   if (location.hash.startsWith("#/audit")) return "audit";
   if (location.hash.startsWith("#/replay")) return "replay";
   if (location.hash.startsWith("#/lab")) return "lab";
@@ -555,9 +557,6 @@ function historyCardHtml() {
         </div>
         <div class="history-source" id="history-source"></div>
       </div>
-      <div class="seg history-region" role="group" aria-label="Which quakes">
-        ${[["northeast", "North-east US · M1+"], ["world", "Worldwide · M4.5+"]].map(([key, label]) => `<button type="button" data-action="history-region" data-region="${key}" aria-pressed="${h.region === key}">${label}</button>`).join("")}
-      </div>
       <div class="history-stats" id="history-stats"><span class="c-muted">Loading history…</span></div>
       <form class="history-controls" id="history-form">
         <div class="field"><label for="h-st">Break a clock in history</label><select id="h-st" class="select small mono"></select></div>
@@ -634,7 +633,15 @@ function fillHistory() {
     tiger && s.chunks ? `hypertable: <b>${s.chunks}</b> chunks, ${s.compressedChunks} compressed${s.compressionRatio ? ` (${s.compressionRatio}× smaller)` : ""}` : null,
     `${esc(view.query)} · <b>${view.elapsedMs} ms</b>`,
   ].filter(Boolean);
+  if (tiger && state.worldStats) chips.push(`worldwide feed: <b>${state.worldStats.picks.toLocaleString()}</b> picks from <b>${state.worldStats.events.toLocaleString()}</b> M4.5+ quakes`);
   $("#history-stats").innerHTML = chips.map((chip) => `<span class="history-chip">${chip}</span>`).join("");
+  if (tiger && !state.worldStats) {
+    getJSON("/api/history?region=world").then((world) => {
+      if (world.source !== "tiger") return;
+      state.worldStats = world.stats;
+      if (state.history.view === view && $("#history-stats")) fillHistory();
+    }).catch(() => {});
+  }
   $("#history-form button[type=submit]").textContent = tiger ? "Run on Tiger" : "Run on bundled copy";
   const select = $("#h-st");
   select.innerHTML = view.stations.map((row) => `<option value="${esc(row.station)}" ${row.station === h.station ? "selected" : ""}>${esc(row.station)}</option>`).join("");
@@ -659,7 +666,6 @@ function fillHistory() {
   $("#history-title").textContent = world
     ? "Every station's clock, north-east quakes plus every M4.5+ quake worldwide"
     : "Every station's clock, every quake since 2018";
-  document.querySelectorAll("[data-action=history-region]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.region === view.region)));
   const stage = $("#history-stage");
   const tip = $("#history-tip");
   state.historyChart?.destroy();
@@ -684,17 +690,8 @@ function fillHistory() {
 }
 
 async function showAudit() {
-  const a = state.audit;
-  a.station ||= "LD.PAL";
-  a.onset ||= state.overview.evaluationEvents[1];
-  try {
-    if (!a.result) {
-      const res = await getJSON("/api/audit?offset=0");
-      a.result = res;
-      a.inspected ||= "LD.PAL";
-    }
-    renderAudit();
-  } catch (error) { errorView(error); }
+  render(historyCardHtml());
+  await mountHistory();
 }
 
 // ---------------------------------------------------------------- solver lab
@@ -1026,7 +1023,8 @@ function explainSide() {
         <div><div class="label">Found</div><div class="stat-mid">${c ? `${sign(c.offsetS, 2)} s` : "—"}</div><div class="mono c-muted" style="font-size:13px">${esc(c?.station || "")}</div></div>
       </div>
       <div class="divider"><div class="label">Error vs USGS epicentre</div><div class="stat-mid"><span class="c-orange">${d.lab.usgsKm.toFixed(1)}</span>${c ? ` → <span class="c-blue">${d.labEx.usgsKm.toFixed(1)} km</span>` : " km"}</div></div>
-      ${s ? `<button class="btn-primary" type="button" data-action="ex-history">Scale it up: every quake since 2018 in Tiger Data${ARROW}</button>` : `<a class="btn-primary" href="#/audit">Every quake since 2018 in Tiger Data${ARROW}</a>`}
+      <a class="btn-primary" href="#/try">Now try it on any real quake${ARROW}</a>
+      ${s ? '<button class="btn-link" type="button" data-action="ex-history" style="padding:4px 0">Or scale it up: this shift in 8 years of Tiger Data</button>' : '<a class="btn-link" href="#/audit" style="padding:4px 0">Or scale it up in Tiger Data</a>'}
       <div class="explain-nav"><button class="btn-plain" type="button" data-action="ex-back">← Back</button><button class="btn-plain" type="button" data-action="ex-restart">Start over</button></div>
       <div class="explain-dots" aria-hidden="true">${dots}</div>`;
     return;
@@ -1094,15 +1092,200 @@ function toggleFullscreen() {
   else document.documentElement.requestFullscreen?.().catch(() => {});
 }
 
+// ---------------------------------------------------------------- try any quake
+
+const TRY_SORTS = [["newest", "Newest"], ["largest", "Largest"], ["stations", "Most stations"]];
+
+function tryQuakeRow(q) {
+  const t = state.tryq;
+  const date = new Date(q.time).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return `<button type="button" class="try-quake" data-quake="${esc(q.id)}" aria-pressed="${q.id === t.event}">
+    <span class="mono try-mag">${q.magnitude !== null ? `M${q.magnitude.toFixed(1)}` : "M?"}</span>
+    <span class="try-place">${esc(q.place || q.id)}${q.live ? ' <span class="try-live">live</span>' : ""}</span>
+    <span class="try-meta">${date} · ${q.stations} stations</span>
+  </button>`;
+}
+
+function tryFiltered() {
+  const t = state.tryq;
+  const needle = t.filter.trim().toLowerCase();
+  const rows = t.list.quakes.filter((q) => !needle || `${q.place} ${q.id} ${q.time.slice(0, 10)}`.toLowerCase().includes(needle));
+  if (t.sort === "largest") rows.sort((a, b) => (b.magnitude ?? -9) - (a.magnitude ?? -9));
+  else if (t.sort === "stations") rows.sort((a, b) => b.stations - a.stations);
+  return rows;
+}
+
+function tryListHtml() {
+  const rows = tryFiltered();
+  if (!rows.length) return '<p class="c-muted" style="margin:8px 4px">No quakes match.</p>';
+  const shown = rows.slice(0, 150);
+  return shown.map(tryQuakeRow).join("") + (rows.length > shown.length ? `<p class="note" style="margin:8px 4px">Showing 150 of ${rows.length}. Search to narrow it down.</p>` : "");
+}
+
+function tryVerdict(res) {
+  const t = state.tryq;
+  const sc = res.scenario;
+  const qt = res.quaketrace;
+  const f = qt.flagged;
+  if (t.secret && !t.revealed) {
+    return f
+      ? { kicker: "QUAKETRACE'S ANSWER", calm: false, title: `${short(f)}'s clock is off by ${sign(qt.foundOffsetS)} s.`, body: "Is that the clock the app changed? Reveal to check." }
+      : { kicker: "QUAKETRACE'S ANSWER", calm: true, title: "No station stands out.", body: "Either nothing was changed, or the change hides in the normal scatter. Reveal to check." };
+  }
+  if (sc.station && f === sc.station) return { kicker: "CAUGHT", calm: true, title: `Caught it. ${short(f)} was the changed clock.`, body: `Injected ${sign(sc.offsetS)} s, found ${sign(qt.foundOffsetS)} s.` };
+  if (sc.station && f) return { kicker: "MISSED", calm: false, title: `Missed. It blamed ${short(f)}, not ${short(sc.station)}.`, body: `With this station layout, dropping ${short(f)} explains the misfit about as well. A few stations close together can make two clocks look alike.` };
+  if (sc.station) return { kicker: "NOT CAUGHT", calm: false, title: `${short(sc.station)}'s ${sign(sc.offsetS)} s shift blended in.`, body: "Small shifts, or a station far from the others, can hide inside the normal scatter. Try a bigger shift or a station closer to the quake." };
+  if (f) return { kicker: "REAL DATA", calm: false, title: `Untouched, but ${short(f)} already looks ${qt.foundOffsetS > 0 ? "late" : "early"}.`, body: `Its real USGS reading disagrees with the other stations by ${sign(qt.foundOffsetS)} s. That can be a bad pick or a real timing problem, so it is worth a look.` };
+  return { kicker: "REAL DATA", calm: true, title: "Every clock agrees.", body: "Nothing changed and no station stands out. Now break one." };
+}
+
+function tryScene(res) {
+  const t = state.tryq;
+  const hidden = t.secret && !t.revealed;
+  const qt = res.quaketrace;
+  const f = qt.flagged;
+  const stations = res.stations.map((s) => ({
+    id: s.id, short: s.short, name: `${s.km} km from the quake`, lat: s.lat, lon: s.lon,
+    tone: s.id === f ? "suspect" : !hidden && s.shifted ? "out" : "",
+  }));
+  const marks = [{ lat: res.event.lat, lon: res.event.lon, kind: "star", label: "USGS", labelUp: true }];
+  marks.push({ lat: res.naive.lat, lon: res.naive.lon, kind: "ring-gray", label: `all stations · ${res.naive.usgsKm.toFixed(1)} km off`, labelLeft: true });
+  if (f) marks.push({ lat: qt.lat, lon: qt.lon, kind: "ring", label: `QuakeTrace · ${qt.usgsKm.toFixed(1)} km off` });
+  const flaggedStation = res.stations.find((s) => s.id === f);
+  return {
+    stations, marks, minSpanKm: 40,
+    outCircle: flaggedStation ? { lat: flaggedStation.lat, lon: flaggedStation.lon, label: `${flaggedStation.short} ${sign(qt.foundOffsetS)} s` } : null,
+  };
+}
+
+function renderTry() {
+  const t = state.tryq;
+  const res = t.result;
+  const list = t.list;
+  const b = list.benchmark;
+  const live = list.quakes.filter((q) => q.live).length;
+  const ev = res.event;
+  const hidden = t.secret && !t.revealed;
+  const v = tryVerdict(res);
+  const sc = res.scenario;
+  const qt = res.quaketrace;
+  const stationOptions = res.stations.map((s) => `<option value="${esc(s.id)}" ${s.id === t.station ? "selected" : ""}>${esc(s.id)} · ${s.km} km</option>`).join("");
+  const looRows = [...res.stations].sort((a, c) => a.withoutRmsS - c.withoutRmsS).map((s) => ({
+    label: s.short, value: s.withoutRmsS, hot: s.id === qt.flagged, tone: s.id === qt.flagged ? "good" : "",
+  }));
+  const distances = [
+    { label: "All stations", value: res.naive.usgsKm },
+    { label: "Standard", value: res.weighted.usgsKm },
+    { label: "QuakeTrace", value: qt.usgsKm, tone: "good", hot: true },
+  ];
+  render(`
+    ${headline("Now break a clock on any real quake.", `${list.quakes.length.toLocaleString()} north-east US quakes since 2018 with at least 6 stations nearby${live ? ` · <b>${live}</b> streamed in live from Tiger Data` : ""}. Pick one, change one station's clock, and see if QuakeTrace names it.`)}
+    ${b ? `<div class="history-stats try-proof">
+      <span class="history-chip">Tested on all <b>${b.quakes}</b>: names the broken station <b>${Math.round(b.caught3 * 100)}%</b> of the time at ±3 s, <b>${Math.round(b.caught5 * 100)}%</b> at ±5 s</span>
+      <span class="history-chip">median error at ±3 s: <b>${b.quaketrace3Km.toFixed(1)} km</b> vs ${b.naive3Km.toFixed(1)} km using every station</span>
+      <span class="history-chip">false alarms on untouched quakes: <b>${Math.round(b.falseFlags * 100)}%</b></span>
+    </div>` : ""}
+    <div class="row">
+      <div class="main-col" style="display:flex;flex-direction:column;gap:16px">
+        <section class="card pad try-picker">
+          <div class="try-picker-head">
+            <div class="kicker" style="color:var(--blue-ink)">1 · PICK A QUAKE</div>
+            <div class="seg" role="group" aria-label="Sort quakes">${TRY_SORTS.map(([key, label]) => `<button type="button" data-action="tq-sort" data-sort="${key}" aria-pressed="${t.sort === key}">${label}</button>`).join("")}</div>
+          </div>
+          <div class="try-search"><input id="tq-search" class="select small" type="search" placeholder="Search a place, date or ID (e.g. New Jersey, 2024-04)" value="${esc(t.filter)}" aria-label="Search quakes"><button class="btn-plain" type="button" data-action="tq-random">Random quake</button></div>
+          <div class="try-list" id="tq-list">${tryListHtml()}</div>
+        </section>
+        <section class="card map-card"><div id="try-map"></div></section>
+        <section class="card pad">
+          <h2 style="margin:0 0 4px;font-size:15px;font-weight:600">Refit without each station</h2>
+          <p class="note" style="margin:0 0 12px">How much the other stations still disagree (RMS, seconds) when one is left out. If dropping one station makes the rest agree much better, that station is the one to blame.</p>
+          <div class="bars">${plainBars(looRows, { unit: " s" })}</div>
+        </section>
+      </div>
+      <div class="side-col">
+        <section class="card pad" style="display:flex;flex-direction:column;gap:14px">
+          <div class="kicker" style="color:var(--blue-ink)">2 · BREAK A CLOCK</div>
+          <div>
+            <div style="font-size:17px;font-weight:600">${ev.magnitude !== null ? `M${ev.magnitude.toFixed(1)} · ` : ""}${esc(ev.place || ev.id)}</div>
+            <div class="c-muted" style="font-size:13px">${new Date(ev.time).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" })} UTC · ${res.stations.length} stations${ev.live ? " · streamed in live" : ""}</div>
+          </div>
+          <div class="field"><label for="tq-st">Station</label><select id="tq-st" class="select small mono" ${hidden ? "disabled" : ""}>${hidden ? "<option>• • •</option>" : stationOptions}</select></div>
+          <div class="field" style="gap:8px"><div class="range-head"><label for="tq-sh">Clock shift</label><span class="shift-value" id="tq-sh-value">${hidden ? "• • •" : `${sign(t.offset)} s`}</span></div>
+            <input id="tq-sh" type="range" min="-10" max="10" step="0.5" value="${hidden ? 0 : t.offset}" ${hidden ? "disabled" : ""}></div>
+          <button class="btn-primary" type="button" data-action="tq-run">${LOCK}Break it and locate</button>
+          <div style="display:flex;justify-content:space-between;gap:8px">
+            <button class="btn-link" type="button" data-action="tq-secret" style="padding:4px 0">Let the app pick secretly</button>
+            <button class="btn-link" type="button" data-action="tq-clean" style="padding:4px 0;color:var(--muted)">Untouched</button>
+          </div>
+        </section>
+        <section class="card pad ${v.calm ? "" : "finding"}" style="display:flex;flex-direction:column;gap:12px">
+          <div class="kicker ${v.calm ? "calm" : ""}">${v.kicker}</div>
+          <div style="font-size:20px;font-weight:600;line-height:1.3">${esc(v.title)}</div>
+          <div style="font-size:14px;line-height:1.5;color:var(--ink-2)">${esc(v.body)}</div>
+          ${hidden ? '<button class="btn-primary" type="button" data-action="tq-reveal">Reveal the answer</button>' : `
+          ${sc.station ? `<div class="grid2">
+            <div><div class="label">Injected</div><div class="stat-mid c-orange">${sign(sc.offsetS)} s</div><div class="mono c-muted" style="font-size:13px">${esc(sc.station)}</div></div>
+            <div><div class="label">Found</div><div class="stat-mid">${qt.flagged ? `${sign(qt.foundOffsetS)} s` : "—"}</div><div class="mono c-muted" style="font-size:13px">${esc(qt.flagged || "")}</div></div>
+          </div>` : ""}
+          <div><div class="label" style="margin-bottom:6px">Distance from the USGS epicentre</div><div class="bars">${plainBars(distances, { unit: " km", digits: 1, wide: true })}</div>
+          <p class="note">All stations: equal weights. Standard: down-weights readings that don't fit, as common locators do. QuakeTrace: drops the station it blames.</p></div>`}
+        </section>
+        <a class="btn-plain try-next" href="#/audit">Scale it up: every station's clock in Tiger Data →</a>
+      </div>
+    </div>
+  `);
+  mountMap("#try-map", tryScene(res));
+  const listBox = $("#tq-list");
+  const picked = listBox?.querySelector("[aria-pressed=true]");
+  if (picked) listBox.scrollTop += picked.getBoundingClientRect().top - listBox.getBoundingClientRect().top - 8;
+}
+
+async function loadTry() {
+  const t = state.tryq;
+  const params = new URLSearchParams({ event: t.event, offset: String(t.applied ? t.offset : 0) });
+  if (t.applied) params.set("station", t.station);
+  t.result = await getJSON(`/api/try?${params}`);
+}
+
+function tryDefaultStation(res) {
+  // The second-closest station that is not the grid's anchor: close enough to matter.
+  const ordered = res.stations.filter((s) => !s.first);
+  return (ordered[1] || ordered[0] || res.stations[0]).id;
+}
+
+async function trySelect(id) {
+  const t = state.tryq;
+  Object.assign(t, { event: id, applied: false, secret: false, revealed: false });
+  await loadTry();
+  t.station = tryDefaultStation(t.result);
+  renderTry();
+}
+
+async function showTry() {
+  const t = state.tryq;
+  try {
+    if (!t.list) t.list = await getJSON("/api/quakes");
+    if (!t.event) {
+      const pick = t.list.quakes.find((q) => q.stations >= 8) || t.list.quakes[0];
+      await trySelect(pick.id);
+      return;
+    }
+    if (!t.result) await loadTry();
+    renderTry();
+  } catch (error) { errorView(error); }
+}
+
 // ---------------------------------------------------------------- events
 
 document.addEventListener("click", async (event) => {
-  const target = event.target.closest("[data-step],[data-action],[data-run],[data-inspect],[data-decide],[data-lab-mode],[data-lab-exclude]");
+  const target = event.target.closest("[data-step],[data-action],[data-run],[data-inspect],[data-decide],[data-lab-mode],[data-lab-exclude],[data-quake]");
   if (!target || !$("#view").contains(target)) return;
   const r = state.replay;
   const a = state.audit;
   try {
-    if (target.dataset.labMode) {
+    if (target.dataset.quake) {
+      await trySelect(target.dataset.quake);
+    } else if (target.dataset.labMode) {
       setLabMode(target.dataset.labMode, { autoplay: target.dataset.labMode === "waves" });
     } else if (target.dataset.labExclude !== undefined) {
       state.lab.exclude = target.dataset.labExclude || null;
@@ -1185,6 +1368,39 @@ document.addEventListener("click", async (event) => {
         const sc = state.explain.story.scenario;
         Object.assign(state.history, { station: sc.station, onset: "2024-04-27", offset: Math.max(-5, Math.min(5, Math.round(sc.offsetS * 2) / 2)), applied: true, view: null, scrollTo: true });
         location.hash = "#/audit";
+      } else if (action === "tq-run") {
+        const t = state.tryq;
+        if (!t.secret || t.revealed) {
+          t.station = $("#tq-st").value;
+          t.offset = Number($("#tq-sh").value);
+          t.secret = false;
+        }
+        Object.assign(t, { applied: true, revealed: false });
+        target.disabled = true;
+        await loadTry();
+        renderTry();
+      } else if (action === "tq-secret") {
+        const t = state.tryq;
+        const ids = t.result.stations.map((s) => s.id);
+        const size = 3 + Math.floor(Math.random() * 5) * 0.5; // 3.0 … 5.0 s, the range the benchmark headline covers
+        Object.assign(t, { station: ids[Math.floor(Math.random() * ids.length)], offset: Math.random() < 0.5 ? -size : size, applied: true, secret: true, revealed: false });
+        await loadTry();
+        renderTry();
+      } else if (action === "tq-reveal") {
+        state.tryq.revealed = true;
+        renderTry();
+      } else if (action === "tq-clean") {
+        Object.assign(state.tryq, { applied: false, secret: false, revealed: false });
+        await loadTry();
+        renderTry();
+      } else if (action === "tq-random") {
+        const rows = tryFiltered();
+        if (rows.length) await trySelect(rows[Math.floor(Math.random() * rows.length)].id);
+      } else if (action === "tq-sort") {
+        state.tryq.sort = target.dataset.sort;
+        document.querySelectorAll("[data-action=tq-sort]").forEach((b) => b.setAttribute("aria-pressed", String(b === target)));
+        $("#tq-list").innerHTML = tryListHtml();
+        $("#tq-list").scrollTop = 0;
       } else if (action === "bench-shift") {
         state.benchmark.shift = Number(target.dataset.shift);
         await showBenchmark();
@@ -1239,6 +1455,11 @@ document.addEventListener("input", (event) => {
     state.maps.forEach((m) => m.setDim?.(state.dim));
   } else if (event.target.id === "h-off") {
     $("#h-off-value").textContent = `${sign(Number(event.target.value))} s`;
+  } else if (event.target.id === "tq-sh") {
+    $("#tq-sh-value").textContent = `${sign(Number(event.target.value))} s`;
+  } else if (event.target.id === "tq-search") {
+    state.tryq.filter = event.target.value;
+    $("#tq-list").innerHTML = tryListHtml();
   } else if (event.target.id === "ex-sh") {
     $("#ex-sh-value").textContent = `${sign(Number(event.target.value))} s`;
   } else if (event.target.id === "lab-sh") {
@@ -1314,7 +1535,8 @@ function setupAbout() {
 
 async function route() {
   if (!state.overview) return;
-  if (currentView() === "audit") await showAudit();
+  if (currentView() === "try") await showTry();
+  else if (currentView() === "audit") await showAudit();
   else if (currentView() === "lab") await showLab();
   else if (currentView() === "benchmark") await showBenchmark();
   else if (currentView() === "explain") await showExplain();

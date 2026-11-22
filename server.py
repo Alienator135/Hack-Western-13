@@ -114,6 +114,17 @@ def history_json(station: str | None, onset: str | None, offset_s: float, region
     return body
 
 
+@lru_cache(maxsize=256)
+def try_json(event_id: str, station: str | None, offset_s: float) -> bytes:
+    from quaketrace.playground import try_quake  # noqa: PLC0415
+    return json.dumps(try_quake(event_id, station, offset_s)).encode()
+
+
+def quakes_json() -> bytes:
+    from quaketrace.playground import quake_list  # noqa: PLC0415
+    return json.dumps(quake_list()).encode()
+
+
 BENCHMARK_FILE = Path(__file__).resolve().parent / "fixtures" / "benchmark.json"
 
 
@@ -129,6 +140,15 @@ def route(path: str, query: dict) -> bytes:
         return overview_json()
     if path == "/api/benchmark":
         return benchmark_json()
+    if path == "/api/quakes":
+        return quakes_json()
+    if path == "/api/try":
+        offset = _offset(query)
+        station = query.get("station", [None])[0] or None
+        event_id = query.get("event", [""])[0]
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", event_id):
+            raise ValueError("Pick a quake from the list.")
+        return try_json(event_id, station if offset else None, offset)
     if path == "/api/waveform":
         return waveform_json()
     if path == "/api/replay":
@@ -190,7 +210,7 @@ def cache_policy(path: str, status: HTTPStatus) -> str:
         return NO_STORE
     if not path.startswith("/api/"):
         return CACHE_STATIC
-    return CACHE_LIVE if path == "/api/history" else CACHE_FIXED
+    return CACHE_LIVE if path in ("/api/history", "/api/quakes", "/api/try") else CACHE_FIXED
 
 
 def respond(raw_path: str) -> tuple[HTTPStatus, bytes, str]:
@@ -311,7 +331,7 @@ def main():
     fixture()  # Fail fast if fixtures are missing.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     source = fixture().arrival_source
-    print(f"QuakeTrace on http://{args.host}:{args.port} · arrivals: {source}", flush=True)
+    print(f"QuakeTrace on http://{args.host}:{args.port} - arrivals: {source}", flush=True)
     if getenv(TIGER_DSN_ENV):
         # Open the shared Tiger connection now so the first click in front of judges is fast.
         threading.Thread(target=_warm_tiger, daemon=True).start()

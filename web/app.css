@@ -339,3 +339,26 @@ footer { font-size: 12px; color: var(--muted); }
   .bm-grid, .bm-grid.two { grid-template-columns: minmax(0, 1fr); }
   .bm-title { font-size: 22px; }
 }
+
+/* Try any quake */
+.try-proof { margin: 16px 0 20px; }
+.try-picker { display: flex; flex-direction: column; gap: 12px; }
+.try-picker-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.try-search { display: flex; gap: 8px; }
+.try-search input { flex: 1; min-width: 0; }
+.try-search .btn-plain { height: 40px; white-space: nowrap; }
+.try-list { max-height: 228px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.try-quake { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: baseline; width: 100%; padding: 9px 12px; background: #FFF; border: 0; border-bottom: 1px solid var(--line); text-align: left; cursor: pointer; color: var(--ink-2); font-size: 14px; }
+.try-quake:last-child { border-bottom: 0; }
+.try-quake:hover { background: #F9FAFB; }
+.try-quake[aria-pressed="true"] { background: var(--soft); color: var(--ink); font-weight: 600; }
+.try-mag { font-size: 13px; color: var(--ink); }
+.try-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.try-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.try-live { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--green); color: #FFF; font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.try-next { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; height: auto; min-height: 48px; padding: 10px 16px; font-weight: 600; color: var(--blue-ink); }
+@media (max-width: 720px) {
+  .try-quake { grid-template-columns: 48px 1fr; }
+  .try-meta { grid-column: 2; }
+  .try-search { flex-direction: column; }
+}
