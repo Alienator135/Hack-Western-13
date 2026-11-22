@@ -3,7 +3,8 @@
     python scripts/run_benchmark.py
 
 Uses only the bundled history, so the result is reproducible offline. The
-Benchmark tab reads the saved file; rerun this after changing the solver.
+headline on Try any quake (and the #/benchmark page) reads the saved file;
+rerun this after changing the solver.
 """
 
 from __future__ import annotations
